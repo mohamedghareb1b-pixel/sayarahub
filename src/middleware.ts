@@ -15,7 +15,7 @@ export function middleware(req: NextRequest) {
   if (authHeader) {
     const [scheme, encoded] = authHeader.split(" ");
     if (scheme === "Basic" && encoded) {
-      const decoded = atob(encoded);
+      const decoded = Buffer.from(encoded, "base64").toString("utf8");
       const [reqUser, reqPass] = decoded.split(":");
       if (reqUser === user && reqPass === pass) {
         return NextResponse.next();
