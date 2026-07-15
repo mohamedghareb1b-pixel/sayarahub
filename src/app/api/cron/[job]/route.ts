@@ -4,11 +4,21 @@ import { runAllExpiryJobs, resetDailyPresence, sendDailyPing } from "@/lib/expir
 
 export const dynamic = "force-dynamic";
 
+function isAuthorized(req: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return true; // لو مفيش سر متظبط في .env (بيئة تطوير محلية) نسمح بالمرور
+  const auth = req.headers.get("authorization");
+  return auth === `Bearer ${secret}`;
+}
+
 // Since there is no pg_cron / external scheduler wired into this sandbox,
 // each of these mirrors one Supabase Edge Function from the PRD (section 8)
 // and can be triggered manually from /admin/jobs or wired to an external
 // cron service (e.g. GitHub Actions, cron-job.org) hitting this URL.
 export async function POST(req: Request, ctx: { params: Promise<{ job: string }> }) {
+  if (!isAuthorized(req)) {
+    return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
   const { job } = await ctx.params;
 
   switch (job) {

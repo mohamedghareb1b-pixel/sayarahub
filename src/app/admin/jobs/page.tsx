@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { runJob } from "./actions";
 
 const JOBS = [
   {
@@ -42,8 +43,7 @@ export default function JobsPage() {
   async function run(id: string) {
     setLoading(id);
     try {
-      const res = await fetch(`/api/cron/${id}`, { method: "POST" });
-      const data = await res.json();
+      const data = await runJob(id);
       setResults((prev) => ({ ...prev, [id]: JSON.stringify(data.result ?? data) }));
     } catch {
       setResults((prev) => ({ ...prev, [id]: "فشل التشغيل" }));
