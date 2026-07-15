@@ -32,57 +32,122 @@ export default async function VocabularyPage() {
         </p>
       </div>
 
-      {/* نموذج الإضافة */}
+      {/* إضافة موديل لماركة موجودة بالفعل */}
       <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-        <h2 className="font-semibold text-slate-900">إضافة مصطلح جديد</h2>
+        <input type="hidden" name="category" value="model_alias" />
+        <h2 className="font-semibold text-slate-900">🚗 إضافة موديل</h2>
+        <p className="text-xs text-slate-500">
+          لموديل جديد لماركة عندنا بالفعل، أو صياغة/اختصار بديل لموديل موجود (زي &quot;راف4&quot;).
+        </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm text-slate-600">النوع</label>
-            <select name="category" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required>
-              <option value="trim">فئة/درجة (مثال: كمفورت)</option>
-              <option value="color">لون (مثال: جملي)</option>
-              <option value="feature">ملاحظة إضافية (مثال: سقف اسود)</option>
-              <option value="model_alias">موديل (مثال: راف فور، أو راف4 كاسم بديل)</option>
-            </select>
-          </div>
-          <div>
             <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه</label>
-            <input
-              name="term"
-              placeholder="مثال: راف4"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              required
-            />
+            <input name="term" placeholder="مثال: راف4" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-600">
-              القيمة الرسمية اللي هتتسجل (للفئة/اللون/الملاحظة) — أو اسم الموديل الرسمي (للنوع &quot;موديل&quot;)
-            </label>
-            <input
-              name="canonicalValue"
-              placeholder="مثال: راف فور"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              required
-            />
+            <label className="mb-1 block text-sm text-slate-600">الماركة</label>
+            <input name="brand" placeholder="تويوتا" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-sm text-slate-600">الماركة (لازم لأي موديل)</label>
-              <input name="brand" placeholder="تويوتا" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-600">الموديل الرسمي (نفسه)</label>
-              <input name="model" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-            </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">اسم الموديل الرسمي</label>
+            <input name="model" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية (نفس اسم الموديل)</label>
+            <input name="canonicalValue" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
         </div>
         <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة
+          إضافة الموديل
         </button>
-        <p className="text-xs text-slate-400">
-          مثال عملي: النوع &quot;موديل&quot;، النص &quot;راف4&quot;، القيمة الرسمية والموديل &quot;راف فور&quot;، الماركة &quot;تويوتا&quot; —
-          كده أي حد يكتب &quot;راف4&quot; هيتفهم صح على طول.
+      </form>
+
+      {/* إضافة ماركة جديدة تماماً (مع أول موديل ليها) */}
+      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+        <input type="hidden" name="category" value="model_alias" />
+        <h2 className="font-semibold text-slate-900">🏷️ إضافة ماركة جديدة</h2>
+        <p className="text-xs text-slate-500">
+          ماركة مش موجودة عندنا خالص (زي بيجو، MG، إلخ). اكتب أول موديل ليها، وتقدر تضيف باقي موديلاتها بعدين من خانة
+          &quot;إضافة موديل&quot; فوق.
         </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">اسم الماركة الجديدة</label>
+            <input name="brand" placeholder="بيجو" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه للموديل</label>
+            <input name="term" placeholder="مثال: 3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">اسم الموديل الرسمي</label>
+            <input name="model" placeholder="3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية (نفس اسم الموديل)</label>
+            <input name="canonicalValue" placeholder="3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+        </div>
+        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+          إضافة الماركة والموديل
+        </button>
+      </form>
+
+      {/* إضافة فئة */}
+      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+        <input type="hidden" name="category" value="trim" />
+        <h2 className="font-semibold text-slate-900">⚙️ إضافة فئة</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه</label>
+            <input name="term" placeholder="مثال: كمفرت" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية</label>
+            <input name="canonicalValue" placeholder="مثال: كمفورت" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+        </div>
+        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+          إضافة الفئة
+        </button>
+      </form>
+
+      {/* إضافة لون */}
+      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+        <input type="hidden" name="category" value="color" />
+        <h2 className="font-semibold text-slate-900">🎨 إضافة لون</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه</label>
+            <input name="term" placeholder="مثال: لولوي" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية</label>
+            <input name="canonicalValue" placeholder="مثال: جملي" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+        </div>
+        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+          إضافة اللون
+        </button>
+      </form>
+
+      {/* إضافة ملاحظة */}
+      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+        <input type="hidden" name="category" value="feature" />
+        <h2 className="font-semibold text-slate-900">📝 إضافة ملاحظة</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه</label>
+            <input name="term" placeholder="مثال: سقف اسود" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية</label>
+            <input name="canonicalValue" placeholder="مثال: سقف اسود" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+          </div>
+        </div>
+        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+          إضافة الملاحظة
+        </button>
       </form>
 
       {/* إضافة بالجملة (لصق عدة مصطلحات دفعة واحدة) */}
