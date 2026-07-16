@@ -1,12 +1,41 @@
 import { db } from "@/db";
 import { showrooms, users, inventory } from "@/db/schema";
 import { desc, eq, and, sql } from "drizzle-orm";
-import { toggleShowroomActive, setSubscriptionPlan, createPresetShowroom, addPresetSalesRep } from "./actions";
+import {
+  toggleShowroomActive,
+  setSubscriptionPlan,
+  createPresetShowroom,
+  addPresetSalesRep,
+  updateUserName,
+  removeUserFromShowroom,
+  deleteUserAccount,
+  deleteShowroom,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function ShowroomsPage() {
   const rows = await db.select().from(showrooms).orderBy(desc(showrooms.createdAt));
+
+  const allStaff = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      phone: users.phone,
+      role: users.role,
+      showroomId: users.showroomId,
+      isActive: users.isActive,
+    })
+    .from(users)
+    .where(and(eq(users.role, "sales"), sql`${users.showroomId} is not null`))
+    .orderBy(users.createdAt);
+  const staffByShowroom = new Map<string, typeof allStaff>();
+  for (const s of allStaff) {
+    if (!s.showroomId) continue;
+    const list = staffByShowroom.get(s.showroomId) ?? [];
+    list.push(s);
+    staffByShowroom.set(s.showroomId, list);
+  }
 
   const staffCounts = await db
     .select({ showroomId: users.showroomId, count: sql<number>`count(*)::int` })
@@ -85,7 +114,40 @@ export default async function ShowroomsPage() {
               <tr key={s.id} className="border-t border-slate-100">
                 <td className="px-4 py-3 font-medium text-slate-900">{s.name}</td>
                 <td className="px-4 py-3 text-slate-500">{s.city}</td>
-                <td className="px-4 py-3">{staffMap.get(s.id) ?? 0}</td>
+                <td className="px-4 py-3">
+                  <details>
+                    <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                      {staffByShowroom.get(s.id)?.length ?? 0} مندوب
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {(staffByShowroom.get(s.id) ?? []).map((rep) => (
+                        <div key={rep.id} className="rounded-lg border border-slate-200 p-2 text-xs">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span dir="ltr" className="text-slate-500">{rep.phone}</span>
+                            <form action={removeUserFromShowroom.bind(null, rep.id)}>
+                              <button type="submit" className="text-rose-600 hover:underline">فصل عن المعرض</button>
+                            </form>
+                          </div>
+                          <form action={updateUserName.bind(null, rep.id)} className="flex gap-1">
+                            <input
+                              name="name"
+                              defaultValue={rep.name ?? ""}
+                              placeholder="اسم المندوب"
+                              className="w-full rounded border border-slate-300 px-2 py-1"
+                            />
+                            <button type="submit" className="rounded bg-slate-800 px-2 py-1 text-white">حفظ</button>
+                          </form>
+                          <form action={deleteUserAccount.bind(null, rep.id)} className="mt-1">
+                            <button type="submit" className="text-rose-500 hover:underline">حذف الحساب نهائياً</button>
+                          </form>
+                        </div>
+                      ))}
+                      {(staffByShowroom.get(s.id) ?? []).length === 0 && (
+                        <p className="text-slate-400">لا يوجد مناديب مسجلين.</p>
+                      )}
+                    </div>
+                  </details>
+                </td>
                 <td className="px-4 py-3">{invMap.get(s.id) ?? 0}</td>
                 <td className="px-4 py-3">
                   {s.monthlyConfirmedMatches} / {s.maxConfirmedMatches >= 999999 ? "∞" : s.maxConfirmedMatches}
@@ -127,6 +189,9 @@ export default async function ShowroomsPage() {
                     <button className="text-xs text-slate-600 hover:underline">
                       {s.isActive ? "حظر" : "تفعيل"}
                     </button>
+                  </form>
+                  <form action={deleteShowroom.bind(null, s.id)} className="mt-1">
+                    <button className="text-xs text-rose-600 hover:underline">حذف نهائي</button>
                   </form>
                 </td>
               </tr>

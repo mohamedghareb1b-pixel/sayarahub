@@ -97,7 +97,7 @@ export const showrooms = pgTable("showrooms", {
     .notNull()
     .default(sql`now() + interval '30 days'`),
   monthlyConfirmedMatches: integer("monthly_confirmed_matches").notNull().default(0),
-  maxConfirmedMatches: integer("max_confirmed_matches").notNull().default(10),
+  maxConfirmedMatches: integer("max_confirmed_matches").notNull().default(999999),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -286,6 +286,7 @@ export const vocabularyCategoryEnum = pgEnum("vocabulary_category", [
   "color",
   "feature",
   "model_alias",
+  "stopword",
 ]);
 
 export const vocabularyTerms = pgTable(

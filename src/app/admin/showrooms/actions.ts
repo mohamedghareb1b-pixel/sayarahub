@@ -91,6 +91,35 @@ export async function toggleShowroomActive(id: string, isActive: boolean) {
   revalidatePath("/admin/showrooms");
 }
 
+export async function updateUserName(userId: string, formData: FormData) {
+  const name = String(formData.get("name") ?? "").trim();
+  await db.update(users).set({ name: name || null }).where(eq(users.id, userId));
+  revalidatePath("/admin/showrooms");
+}
+
+/** يفصل المندوب عن المعرض (بدون حذف حسابه بالكامل) — لو غلط انضم لمعرض غلط
+ * أو سابه فعلياً، ده بيرجعه لحالة "بدون معرض" بدل حذفه نهائياً. */
+export async function removeUserFromShowroom(userId: string) {
+  await db
+    .update(users)
+    .set({ showroomId: null, role: "sales", onboardingComplete: false, conversationState: { step: "ask_role" } })
+    .where(eq(users.id, userId));
+  revalidatePath("/admin/showrooms");
+}
+
+/** حذف نهائي لحساب المستخدم بالكامل (لو رقم غلط تماماً أو حساب تجربة). */
+export async function deleteUserAccount(userId: string) {
+  await db.delete(users).where(eq(users.id, userId));
+  revalidatePath("/admin/showrooms");
+}
+
+/** حذف المعرض نهائياً (المخزون والطلبات المرتبطة بيه بتتأثر حسب علاقات
+ * قاعدة البيانات — استخدمها بحذر، الأفضل "حظر" المعرض بدل حذفه لو ممكن). */
+export async function deleteShowroom(showroomId: string) {
+  await db.update(users).set({ showroomId: null }).where(eq(users.showroomId, showroomId));
+  await db.delete(showrooms).where(eq(showrooms.id, showroomId));
+  revalidatePath("/admin/showrooms");
+}
 export async function setSubscriptionPlan(id: string, plan: "free" | "pro") {
   await db
     .update(showrooms)

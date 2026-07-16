@@ -2,22 +2,9 @@ import { db } from "@/db";
 import { vocabularyTerms } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { addVocabularyTerm, deleteVocabularyTerm, bulkAddVocabularyTerms } from "./actions";
+import VocabularyTable from "./VocabularyTable";
 
 export const dynamic = "force-dynamic";
-
-const CATEGORY_LABEL: Record<string, string> = {
-  trim: "فئة/درجة",
-  color: "لون",
-  feature: "ملاحظة إضافية",
-  model_alias: "موديل",
-};
-
-const CATEGORY_COLOR: Record<string, string> = {
-  trim: "bg-sky-100 text-sky-700",
-  color: "bg-purple-100 text-purple-700",
-  feature: "bg-amber-100 text-amber-700",
-  model_alias: "bg-emerald-100 text-emerald-700",
-};
 
 export default async function VocabularyPage() {
   const rows = await db.select().from(vocabularyTerms).orderBy(desc(vocabularyTerms.createdAt));
@@ -38,11 +25,16 @@ export default async function VocabularyPage() {
         <h2 className="font-semibold text-slate-900">🚗 إضافة موديل</h2>
         <p className="text-xs text-slate-500">
           لموديل جديد لماركة عندنا بالفعل، أو صياغة/اختصار بديل لموديل موجود (زي &quot;راف4&quot;).
+          اكتب الاسم بالعربي و/أو بالإنجليزي — أي حد يكتب أي صيغة منهم هيتفهم صح.
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه</label>
-            <input name="term" placeholder="مثال: راف4" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+            <label className="mb-1 block text-sm text-slate-600">النص بالعربي</label>
+            <input name="term_ar" placeholder="مثال: جي 7" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">النص بالإنجليزي</label>
+            <input name="term_en" placeholder="مثال: G7" dir="ltr" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           </div>
           <div>
             <label className="mb-1 block text-sm text-slate-600">الماركة</label>
@@ -52,11 +44,12 @@ export default async function VocabularyPage() {
             <label className="mb-1 block text-sm text-slate-600">اسم الموديل الرسمي</label>
             <input name="model" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
-          <div>
+          <div className="sm:col-span-2">
             <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية (نفس اسم الموديل)</label>
             <input name="canonicalValue" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
         </div>
+        <p className="text-xs text-slate-400">لازم تملأ خانة واحدة على الأقل من العربي/الإنجليزي.</p>
         <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
           إضافة الموديل
         </button>
@@ -67,8 +60,8 @@ export default async function VocabularyPage() {
         <input type="hidden" name="category" value="model_alias" />
         <h2 className="font-semibold text-slate-900">🏷️ إضافة ماركة جديدة</h2>
         <p className="text-xs text-slate-500">
-          ماركة مش موجودة عندنا خالص (زي بيجو، MG، إلخ). اكتب أول موديل ليها، وتقدر تضيف باقي موديلاتها بعدين من خانة
-          &quot;إضافة موديل&quot; فوق.
+          ماركة مش موجودة عندنا خالص (زي بيجو، MG، إلخ). اكتب أول موديل ليها بالعربي و/أو بالإنجليزي، وتقدر تضيف
+          باقي موديلاتها بعدين من خانة &quot;إضافة موديل&quot; فوق. مثال: النص العربي &quot;ام جي 7&quot;، الإنجليزي &quot;MG G7&quot;.
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
@@ -76,18 +69,23 @@ export default async function VocabularyPage() {
             <input name="brand" placeholder="بيجو" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه للموديل</label>
-            <input name="term" placeholder="مثال: 3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div>
             <label className="mb-1 block text-sm text-slate-600">اسم الموديل الرسمي</label>
             <input name="model" placeholder="3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
           <div>
+            <label className="mb-1 block text-sm text-slate-600">اسم الموديل بالعربي</label>
+            <input name="term_ar" placeholder="مثال: ٣٠٠٨" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">اسم الموديل بالإنجليزي</label>
+            <input name="term_en" placeholder="مثال: 3008" dir="ltr" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div className="sm:col-span-2">
             <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية (نفس اسم الموديل)</label>
             <input name="canonicalValue" placeholder="3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
         </div>
+        <p className="text-xs text-slate-400">لازم تملأ خانة واحدة على الأقل من العربي/الإنجليزي.</p>
         <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
           إضافة الماركة والموديل
         </button>
@@ -150,6 +148,28 @@ export default async function VocabularyPage() {
         </button>
       </form>
 
+      {/* إضافة كلمة ممنوعة (متتسجلش في الملاحظات خالص حتى لو معرفناهاش) */}
+      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+        <input type="hidden" name="category" value="stopword" />
+        <h2 className="font-semibold text-slate-900">🚫 كلمة ممنوعة (Stopword)</h2>
+        <p className="text-xs text-slate-500">
+          كلمات زي &quot;اللون&quot; أو &quot;موديل&quot; بيكتبها الناس أحياناً بدون فايدة حقيقية — أضفها هنا عشان متظهرش في الملاحظات أبداً.
+        </p>
+        <div className="flex gap-3">
+          <input
+            name="term"
+            placeholder="مثال: اللون"
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            required
+          />
+          {/* القيمة الرسمية مش لها معنى هنا، بس محتاجينها تقنياً — بنملاها تلقائي بنفس الكلمة */}
+          <input type="hidden" name="canonicalValue" value="-" />
+          <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+            إضافة كممنوعة
+          </button>
+        </div>
+      </form>
+
       {/* إضافة بالجملة (لصق عدة مصطلحات دفعة واحدة) */}
       <form action={bulkAddVocabularyTerms} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
         <h2 className="font-semibold text-slate-900">إضافة بالجملة (Bulk Add)</h2>
@@ -171,50 +191,8 @@ export default async function VocabularyPage() {
         </button>
       </form>
 
-      {/* الجدول */}
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-right text-slate-500">
-            <tr>
-              <th className="px-4 py-3">النوع</th>
-              <th className="px-4 py-3">النص المكتوب</th>
-              <th className="px-4 py-3">القيمة الرسمية</th>
-              <th className="px-4 py-3">الماركة/الموديل</th>
-              <th className="px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100">
-                <td className="px-4 py-3">
-                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${CATEGORY_COLOR[r.category]}`}>
-                    {CATEGORY_LABEL[r.category] ?? r.category}
-                  </span>
-                </td>
-                <td className="px-4 py-3 font-medium text-slate-900">{r.term}</td>
-                <td className="px-4 py-3 text-slate-600">{r.canonicalValue}</td>
-                <td className="px-4 py-3 text-slate-500">
-                  {r.brand || r.model ? `${r.brand ?? ""} ${r.model ?? ""}`.trim() : "—"}
-                </td>
-                <td className="px-4 py-3">
-                  <form action={deleteVocabularyTerm.bind(null, r.id)}>
-                    <button type="submit" className="text-xs font-semibold text-rose-600 hover:underline">
-                      حذف
-                    </button>
-                  </form>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                  لا توجد مصطلحات مضافة بعد.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* الجدول (بحث + أقسام) */}
+      <VocabularyTable rows={rows} onDelete={deleteVocabularyTerm} />
     </div>
   );
 }

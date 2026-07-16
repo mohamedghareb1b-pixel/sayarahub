@@ -7,31 +7,39 @@ import { revalidatePath } from "next/cache";
 
 export async function addVocabularyTerm(formData: FormData) {
   const category = String(formData.get("category") ?? "");
-  const term = String(formData.get("term") ?? "").trim();
   const canonicalValue = String(formData.get("canonicalValue") ?? "").trim();
   const brand = String(formData.get("brand") ?? "").trim();
   const model = String(formData.get("model") ?? "").trim();
 
-  if (!term || !canonicalValue) return;
-  if (!["trim", "color", "feature", "model_alias"].includes(category)) return;
+  if (!["trim", "color", "feature", "model_alias", "stopword"].includes(category)) return;
 
-  await db
-    .insert(vocabularyTerms)
-    .values({
-      category: category as "trim" | "color" | "feature" | "model_alias",
-      term,
-      canonicalValue,
-      brand: category === "model_alias" ? brand || null : null,
-      model: category === "model_alias" ? model || null : null,
-    })
-    .onConflictDoUpdate({
-      target: [vocabularyTerms.term, vocabularyTerms.category],
-      set: {
+  // للموديل/الماركة بنقبل خانتين (عربي + إنجليزي) وبنسجل كل واحدة فيهم لوحدها
+  // لو موجودة، عشان أي حد يكتب أي صيغة من الاتنين يترجم لنفس الموديل الرسمي.
+  const termAr = String(formData.get("term_ar") ?? formData.get("term") ?? "").trim();
+  const termEn = String(formData.get("term_en") ?? "").trim();
+  const terms = [termAr, termEn].filter(Boolean);
+
+  if (terms.length === 0 || !canonicalValue) return;
+
+  for (const term of terms) {
+    await db
+      .insert(vocabularyTerms)
+      .values({
+        category: category as "trim" | "color" | "feature" | "model_alias" | "stopword",
+        term,
         canonicalValue,
         brand: category === "model_alias" ? brand || null : null,
         model: category === "model_alias" ? model || null : null,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: [vocabularyTerms.term, vocabularyTerms.category],
+        set: {
+          canonicalValue,
+          brand: category === "model_alias" ? brand || null : null,
+          model: category === "model_alias" ? model || null : null,
+        },
+      });
+  }
 
   revalidatePath("/admin/vocabulary");
 }
@@ -54,7 +62,7 @@ export async function bulkAddVocabularyTerms(formData: FormData) {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const validCategories = new Set(["trim", "color", "feature", "model_alias"]);
+  const validCategories = new Set(["trim", "color", "feature", "model_alias", "stopword"]);
 
   for (const line of lines) {
     const parts = line.split(",").map((p) => p.trim());

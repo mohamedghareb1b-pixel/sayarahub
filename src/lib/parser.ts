@@ -69,10 +69,17 @@ function extractColor(text: string): string | null {
   // اللون الخارجي: نبحث فقط في الجزء اللي قبل كلمة "داخلي" (لو موجودة) عشان
   // منلخبطش مع اللون الداخلي المذكور بعدها في نفس الرسالة.
   const { exteriorPart } = splitExteriorInterior(text);
+  const found: string[] = [];
   for (const c of COLORS) {
-    if (exteriorPart.includes(normalizeForMatch(c))) return c;
+    if (exteriorPart.includes(normalizeForMatch(c)) && !found.includes(c)) found.push(c);
   }
-  return findDynamicTerm(getVocabCache().colors, exteriorPart);
+  const dynamicColors = getVocabCache().colors;
+  for (const entry of dynamicColors) {
+    if (entry.term && exteriorPart.includes(entry.term) && !found.includes(entry.value)) found.push(entry.value);
+  }
+  // لو المستخدم كتب أكتر من لون سوا (زي "أبيض و أحمر" أو "أبيض/أحمر")، نسجلهم
+  // كلهم مفصولين، عشان نطابق مع أي معرض عنده أي لون منهم.
+  return found.length > 0 ? found.join("، ") : null;
 }
 
 function extractSpec(text: string): string | null {
@@ -115,10 +122,14 @@ const KNOWN_TRIMS = [
 ];
 
 function extractTrim(text: string): string | null {
+  const found: string[] = [];
   for (const t of KNOWN_TRIMS) {
-    if (text.includes(t)) return t;
+    if (text.includes(t) && !found.includes(t)) found.push(t);
   }
-  return findDynamicTerm(getVocabCache().trims, text);
+  for (const entry of getVocabCache().trims) {
+    if (entry.term && text.includes(entry.term) && !found.includes(entry.value)) found.push(entry.value);
+  }
+  return found.length > 0 ? found.join("، ") : null;
 }
 
 function extractInteriorColor(text: string): string | null {
@@ -217,6 +228,7 @@ function extractLeftoverNotes(cleaned: string, recognizedValues: (string | null)
 
   const leftover = tokens.filter((t) => {
     if (IGNORE_WORDS.has(t)) return false;
+    if (getVocabCache().stopwords.includes(t)) return false;
     if (/^\d+$/.test(t)) return false; // أرقام (سنة/سعر) اتلقطت بالفعل في حقولها
     return !recognizedNorm.includes(t);
   });
@@ -264,7 +276,6 @@ export function ruleBasedParse(rawText: string): ParsedCar {
 
   const year = extractYear(cleaned);
   const city = extractCity(cleaned);
-  const color = extractColor(cleaned);
   const interiorColor = extractInteriorColor(cleaned);
   const extraFeatures = extractExtraFeatures(cleaned);
   const engineSize = extractEngineSize(cleaned);
@@ -272,7 +283,20 @@ export function ruleBasedParse(rawText: string): ParsedCar {
   const fuelType = extractFuelType(cleaned);
   const transmission = extractTransmission(cleaned);
   const price = extractPrice(cleaned);
-  const trim = extractTrim(normalized);
+  let trim = extractTrim(normalized);
+
+  // حالة الكلمة الملتبسة (زي "تيتانيوم" مسجلة كفئة ولون مع بعض): لو نفس
+  // الكلمة اتلقطت في الفئة واللون، بنشوف اتكررت في الرسالة كام مرة —
+  // مرة واحدة = نفترضها فئة بس (واللون هيتسأل عنه لو لازم)، مرتين = نسيبها
+  // في الاتنين لأن المستخدم قصدهم فعلاً كحاجتين منفصلتين.
+  let color = extractColor(cleaned);
+  if (trim && color && normalizeForMatch(trim) === normalizeForMatch(color)) {
+    const escaped = normalizeForMatch(trim).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const occurrences = (normalized.match(new RegExp(escaped, "g")) || []).length;
+    if (occurrences < 2) {
+      color = null;
+    }
+  }
 
   // لو المستخدم ماكتبش سعودي/خليجي/امريكي.. الخ، نفترض "سعودي" مباشرة
   // بدل ما نسأل عنها أو نسيبها فاضية — السوق المستهدف سعودي أصلاً.

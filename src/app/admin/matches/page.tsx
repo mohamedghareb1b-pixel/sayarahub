@@ -41,7 +41,7 @@ export default async function MatchesPage() {
     .leftJoin(requesterShowroom, eq(matches.requestShowroomId, requesterShowroom.id))
     .leftJoin(supplierShowroom, eq(matches.inventoryShowroomId, supplierShowroom.id))
     .orderBy(desc(matches.createdAt))
-    .limit(200);
+    .limit(50000);
 
   return (
     <div className="space-y-6">

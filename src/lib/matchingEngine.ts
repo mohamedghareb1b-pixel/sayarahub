@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { inventory, matches, requests, showrooms, users } from "@/db/schema";
-import { and, desc, eq, gt, inArray, ne, notInArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { enqueueMessage } from "./whatsapp";
 
 /** Round-robin salesperson picker per PRD 4.5. Falls back to the owner if the
@@ -53,13 +53,39 @@ function fullCarLabel(car: {
   return notes.length > 0 ? `${main}\n📝 ${notes.join("، ")}` : main;
 }
 
+/** يقسّم قيمة ممكن تكون فيها أكتر من خيار (زي "أبيض، أحمر") لقائمة مفصولة،
+ * عشان نقدر نطابق لو أي واحدة من القيم دي اتوفرت، مش قيمة واحدة بس. */
+function splitMultiValue(value: string | null): string[] {
+  if (!value) return [];
+  return value
+    .split(/[،,]/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+/** true لو فيه أي تداخل بين قائمتين (قيمة واحدة أو أكتر من كل جانب). */
+function hasOverlap(a: string | null, b: string | null): boolean {
+  const listA = splitMultiValue(a);
+  const listB = splitMultiValue(b);
+  if (listA.length === 0 || listB.length === 0) return false;
+  return listA.some((x) => listB.includes(x));
+}
+
+/** يبني شرط SQL للمطابقة الإجبارية (برand/موديل/فئة..): لو القيمة فيها أكتر
+ * من خيار مفصول بفاصلة، بيطابق لو العمود ساوى أي واحدة منهم. */
+function multiValueCondition(col: Parameters<typeof eq>[0], value: string | null) {
+  const parts = splitMultiValue(value);
+  if (parts.length === 0) return undefined;
+  return parts.length > 1 ? inArray(col, parts) : eq(col, parts[0]);
+}
+
 function scoreMatch(
   req: { color: string | null; trim: string | null; city: string; spec: string | null },
   inv: { color: string | null; trim: string | null; city: string; spec: string | null },
 ) {
   let score = 0;
-  if (req.color && inv.color && req.color === inv.color) score += 1;
-  if (req.trim && inv.trim && req.trim === inv.trim) score += 1;
+  if (hasOverlap(req.color, inv.color)) score += 1;
+  if (hasOverlap(req.trim, inv.trim)) score += 1;
   if (req.city && inv.city && req.city === inv.city) score += 1;
   if (req.spec && inv.spec && req.spec === inv.spec) score += 1;
   return score;
@@ -105,7 +131,7 @@ export async function runMatchingForRequest(requestId: string, excludeShowroomId
         eq(inventory.brand, req.brand),
         eq(inventory.model, req.model),
         eq(inventory.year, req.year),
-        req.trim ? eq(inventory.trim, req.trim) : undefined,
+        req.trim ? multiValueCondition(inventory.trim, req.trim) : undefined,
         eq(inventory.status, "available"),
         gt(inventory.expiresAt, new Date()),
         excluded.length ? notInArray(inventory.showroomId, excluded) : undefined,
@@ -172,7 +198,10 @@ export async function runMatchingForInventory(inventoryId: string) {
         eq(requests.brand, inv.brand),
         eq(requests.model, inv.model),
         eq(requests.year, inv.year),
-        inv.trim ? eq(requests.trim, inv.trim) : undefined,
+        // inv.trim قيمة واحدة (عربية بعينها)، لكن requests.trim ممكن يكون فيه
+        // أكتر من خيار مفصول بفاصلة (زي "فل كامل، ستاندر") — بنستخدم تحقق
+        // احتواء بدل تطابق حرفي كامل عشان نلاقي الطلب حتى لو مطلوب فيه خيارات تانية.
+        inv.trim ? sql`${requests.trim} like ${"%" + inv.trim + "%"}` : undefined,
         eq(requests.status, "open"),
         gt(requests.expiresAt, new Date()),
         ne(requests.showroomId, inv.showroomId),

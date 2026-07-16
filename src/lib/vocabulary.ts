@@ -10,10 +10,11 @@ type VocabCache = {
   colors: VocabEntry[];
   features: VocabEntry[];
   modelAliases: ModelAliasEntry[];
+  stopwords: string[];
   loadedAt: number;
 };
 
-let cache: VocabCache = { trims: [], colors: [], features: [], modelAliases: [], loadedAt: 0 };
+let cache: VocabCache = { trims: [], colors: [], features: [], modelAliases: [], stopwords: [], loadedAt: 0 };
 
 // نعيد تحميل المفردات من قاعدة البيانات كل دقيقة كحد أقصى، عشان أي إضافة
 // جديدة من الأدمن تنعكس بسرعة معقولة بدون ما نضرب قاعدة البيانات في كل رسالة.
@@ -36,6 +37,7 @@ export async function ensureVocabularyLoaded(): Promise<void> {
       modelAliases: rows
         .filter((r) => r.category === "model_alias" && r.brand && r.model)
         .map((r) => ({ term: normalizeForMatch(r.term), brand: r.brand!, model: r.model! })),
+      stopwords: rows.filter((r) => r.category === "stopword").map((r) => normalizeForMatch(r.term)),
       loadedAt: Date.now(),
     };
   } catch {
