@@ -304,6 +304,24 @@ export const vocabularyTerms = pgTable(
   },
   (t) => [uniqueIndex("idx_vocab_term_category").on(t.term, t.category)],
 );
+
+// ── Vocabulary review queue (كلمات جديدة مستنية مراجعة الأدمن) ────────────
+// أي كلمة يكتبها مستخدم في وضع الإدخال اليدوي ومش معرّفة عندنا، بتتسجل هنا
+// "معلّقة" — الطلب/العرض نفسه بيكمل عادي بالنص الخام، والأدمن بعدين يراجع
+// ويحدد القيمة الرسمية من /admin/vocabulary، وقتها بس بتتسجل في vocabulary_terms.
+export const vocabularyReviewQueue = pgTable(
+  "vocabulary_review_queue",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    category: vocabularyCategoryEnum("category").notNull(),
+    term: text("term").notNull(),
+    brand: text("brand"), // سياق الماركة لو الكلمة موديل، يساعد وقت المراجعة
+    occurrences: integer("occurrences").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("idx_vocab_review_term_category").on(t.term, t.category)],
+);
+
 // كل نص طُبّع وأُرسل من مستخدم ووافق البوت على تحليله (أو صححه) يتخزن هنا.
 // المرة الجاية اللي حد يكتب نص طبيعي مشابه، بنرجع النتيجة المحفوظة مباشرة
 // بدل ما نعيد التحليل بالقواعد أو بالذكاء الاصطناعي من الصفر.

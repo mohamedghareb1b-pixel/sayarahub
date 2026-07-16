@@ -9,6 +9,7 @@ import {
   requests as requestsTable,
   inventory as inventoryTable,
   vocabularyTerms,
+  vocabularyReviewQueue,
 } from "@/db/schema";
 import { enqueueMessage, logInbound, type Button } from "./whatsapp";
 import { parseFreeText, extractFieldAnswer, lookupCorrection, saveCorrection, type ParsedCar } from "./parser";
@@ -112,50 +113,58 @@ function idleMenuButtons(): Button[] {
 }
 
 /** لو المستخدم في وضع "الإدخال اليدوي خطوة بخطوة" كتب قيمة مش معرّفة عندنا
- * خالص (ماركة/موديل/فئة/لون جديد)، نسجلها تلقائياً في جدول المفردات —
- * بكده النظام بيتعلم من الاستخدام الفعلي بدل ما يستنى حد يضيفها يدوي من
- * /admin/vocabulary. الشرط: بنعمل ده بس في وضع الإدخال اليدوي (مش الكتابة
- * الحرة العادية) عشان منعلمش النظام على حاجات غلط من رسائل مبهمة.
+ * خالص (ماركة/موديل/فئة/لون جديد)، بنسجلها في "قايمة انتظار مراجعة" — الطلب
+ * أو العرض نفسه بيكمل عادي بالنص الخام اللي كتبه، ومش بنسجلها في المفردات
+ * الرسمية تلقائي. الأدمن بعدين يراجعها من /admin/vocabulary ويحدد القيمة
+ * الرسمية بنفسه قبل ما تتفعّل فعلياً — عشان نضمن جودة المفردات المسجلة.
  */
-async function autoLearnIfUnknown(field: string, rawAnswer: string, currentBrand: string | null) {
+async function flagUnknownTermForReview(field: string, rawAnswer: string, currentBrand: string | null) {
   const value = rawAnswer.trim();
   if (!value || value.length < 2) return;
   const norm = normalizeForMatch(value);
 
+  const categoryMap: Record<string, "brand_alias" | "model_alias" | "trim" | "color"> = {
+    brand: "brand_alias",
+    model: "model_alias",
+    trim: "trim",
+    color: "color",
+  };
+  const category = categoryMap[field];
+  if (!category) return;
+
   try {
+    let known = false;
     if (field === "brand") {
-      const known = CAR_BRANDS.some((b) => normalizeForMatch(b.brand) === norm) || findDynamicBrandAlias(norm);
-      if (known) return;
-      await db
-        .insert(vocabularyTerms)
-        .values({ category: "brand_alias", term: value, canonicalValue: value, brand: value })
-        .onConflictDoNothing();
-    } else if (field === "model" && currentBrand) {
-      const known = findModelInText(norm)?.model || findDynamicTerm(getVocabCache().trims, norm);
-      if (known) return;
-      await db
-        .insert(vocabularyTerms)
-        .values({ category: "model_alias", term: value, canonicalValue: value, brand: currentBrand, model: value })
-        .onConflictDoNothing();
+      known = CAR_BRANDS.some((b) => normalizeForMatch(b.brand) === norm) || Boolean(findDynamicBrandAlias(norm));
+    } else if (field === "model") {
+      known = Boolean(findModelInText(norm)?.model);
     } else if (field === "trim") {
-      const known = findDynamicTerm(getVocabCache().trims, norm);
-      if (known) return;
-      await db
-        .insert(vocabularyTerms)
-        .values({ category: "trim", term: value, canonicalValue: value })
-        .onConflictDoNothing();
+      known = Boolean(findDynamicTerm(getVocabCache().trims, norm));
     } else if (field === "color") {
-      const knownStatic = COLORS.some((c) => normalizeForMatch(c) === norm);
-      const knownDynamic = findDynamicTerm(getVocabCache().colors, norm);
-      if (knownStatic || knownDynamic) return;
+      known = COLORS.some((c) => normalizeForMatch(c) === norm) || Boolean(findDynamicTerm(getVocabCache().colors, norm));
+    }
+    if (known) return;
+
+    const [existing] = await db
+      .select()
+      .from(vocabularyReviewQueue)
+      .where(and(eq(vocabularyReviewQueue.term, value), eq(vocabularyReviewQueue.category, category)));
+
+    if (existing) {
       await db
-        .insert(vocabularyTerms)
-        .values({ category: "color", term: value, canonicalValue: value })
-        .onConflictDoNothing();
+        .update(vocabularyReviewQueue)
+        .set({ occurrences: sql`${vocabularyReviewQueue.occurrences} + 1` })
+        .where(eq(vocabularyReviewQueue.id, existing.id));
+    } else {
+      await db.insert(vocabularyReviewQueue).values({
+        category,
+        term: value,
+        brand: field === "model" ? currentBrand : null,
+      });
     }
   } catch {
-    // لو فشل التسجيل (مثلاً تعارض فريد)، نتجاهله بهدوء — الأولوية إن
-    // إدخال المستخدم نفسه يكمل عادي.
+    // لو فشل التسجيل لأي سبب، نتجاهله بهدوء — إدخال المستخدم الأساسي أهم
+    // ومكملش عادي حتى لو ملحقناش نسجل الكلمة في قايمة المراجعة.
   }
 }
 
@@ -812,7 +821,7 @@ export async function handleIncomingMessage(input: {
       // القيمة دي مش معرّفة عندنا خالص، سجّلها تلقائياً كمفردة جديدة —
       // بكده النظام "يتعلم" من كل إدخال يدوي بدون ما يحتاج تدخل يدوي منك.
       if (st.pendingParsed.confidence === 1 && typeof value === "string") {
-        await autoLearnIfUnknown(field, value, parsed.brand);
+        await flagUnknownTermForReview(field, value, parsed.brand);
       }
 
       // كمان: أعد فحص الرد كامل، لأن المستخدم غالباً بيبعت كل التفاصيل مرة واحدة

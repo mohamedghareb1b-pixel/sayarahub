@@ -1,13 +1,30 @@
 import { db } from "@/db";
-import { vocabularyTerms } from "@/db/schema";
+import { vocabularyTerms, vocabularyReviewQueue } from "@/db/schema";
 import { desc } from "drizzle-orm";
-import { addVocabularyTerm, deleteVocabularyTerm, bulkAddVocabularyTerms } from "./actions";
+import {
+  addVocabularyTerm,
+  deleteVocabularyTerm,
+  bulkAddVocabularyTerms,
+  resolveReviewedTerm,
+  dismissReviewedTerm,
+} from "./actions";
 import VocabularyTable from "./VocabularyTable";
 
 export const dynamic = "force-dynamic";
 
+const CATEGORY_LABEL_SHORT: Record<string, string> = {
+  trim: "فئة",
+  color: "لون",
+  model_alias: "موديل",
+  brand_alias: "ماركة",
+};
+
 export default async function VocabularyPage() {
   const rows = await db.select().from(vocabularyTerms).orderBy(desc(vocabularyTerms.createdAt));
+  const pending = await db
+    .select()
+    .from(vocabularyReviewQueue)
+    .orderBy(desc(vocabularyReviewQueue.occurrences));
 
   return (
     <div className="space-y-6">
@@ -18,6 +35,52 @@ export default async function VocabularyPage() {
           التغييرات بتنعكس خلال دقيقة تقريباً.
         </p>
       </div>
+
+      {/* كلمات مستنية المراجعة — دخلها مستخدمين في وضع الإدخال اليدوي ومش معرّفة عندنا */}
+      {pending.length > 0 && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 space-y-3">
+          <h2 className="font-semibold text-amber-900">⏳ كلمات مستنية المراجعة ({pending.length})</h2>
+          <p className="text-xs text-amber-700">
+            المستخدمين كتبوا الكلمات دي أثناء الإدخال اليدوي ومش موجودة عندنا. الطلب/العرض بتاعهم اتسجل عادي
+            بالنص الخام، وده مش هيؤثر عليهم — بس حدد القيمة الرسمية هنا عشان تتفهم صح المرة الجاية.
+          </p>
+          <div className="space-y-2">
+            {pending.map((p) => (
+              <div key={p.id} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-white p-3 sm:flex-row sm:items-center">
+                <div className="flex-1">
+                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                    {CATEGORY_LABEL_SHORT[p.category] ?? p.category}
+                  </span>
+                  <span className="mr-2 font-medium text-slate-900">{p.term}</span>
+                  {p.brand && <span className="mr-2 text-xs text-slate-400">(ماركة: {p.brand})</span>}
+                  <span className="mr-2 text-xs text-slate-400">تكررت {p.occurrences} مرة</span>
+                </div>
+                <form action={resolveReviewedTerm} className="flex gap-2">
+                  <input type="hidden" name="queueId" value={p.id} />
+                  <input type="hidden" name="category" value={p.category} />
+                  <input type="hidden" name="term" value={p.term} />
+                  <input type="hidden" name="brand" value={p.brand ?? ""} />
+                  <input
+                    name="resolvedValue"
+                    required
+                    placeholder="القيمة الرسمية (مثال: GXR)"
+                    dir="ltr"
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                  />
+                  <button type="submit" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">
+                    حفظ
+                  </button>
+                </form>
+                <form action={dismissReviewedTerm.bind(null, p.id)}>
+                  <button type="submit" className="text-xs text-slate-400 hover:text-rose-600 hover:underline">
+                    تجاهل
+                  </button>
+                </form>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* إضافة موديل لماركة موجودة بالفعل */}
       <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">

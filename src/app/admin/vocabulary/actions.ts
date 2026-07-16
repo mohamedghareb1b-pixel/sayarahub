@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { vocabularyTerms } from "@/db/schema";
+import { vocabularyTerms, vocabularyReviewQueue } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -89,5 +89,46 @@ export async function bulkAddVocabularyTerms(formData: FormData) {
       });
   }
 
+  revalidatePath("/admin/vocabulary");
+}
+
+/** يحسم كلمة معلّقة: يسجلها في المفردات الرسمية بالقيمة اللي حددها الأدمن،
+ * ويشيلها من قايمة الانتظار. */
+export async function resolveReviewedTerm(formData: FormData) {
+  const queueId = String(formData.get("queueId") ?? "");
+  const category = String(formData.get("category") ?? "") as
+    | "trim"
+    | "color"
+    | "feature"
+    | "model_alias"
+    | "stopword"
+    | "brand_alias";
+  const term = String(formData.get("term") ?? "").trim();
+  const canonicalValue = String(formData.get("resolvedValue") ?? "").trim();
+  const brand = String(formData.get("brand") ?? "").trim() || null;
+
+  if (!queueId || !term || !canonicalValue) return;
+
+  await db
+    .insert(vocabularyTerms)
+    .values({
+      category,
+      term,
+      canonicalValue,
+      brand: category === "model_alias" ? brand : category === "brand_alias" ? canonicalValue : null,
+      model: category === "model_alias" ? canonicalValue : null,
+    })
+    .onConflictDoUpdate({
+      target: [vocabularyTerms.term, vocabularyTerms.category],
+      set: { canonicalValue },
+    });
+
+  await db.delete(vocabularyReviewQueue).where(eq(vocabularyReviewQueue.id, queueId));
+  revalidatePath("/admin/vocabulary");
+}
+
+/** يتجاهل كلمة معلّقة من غير ما يسجلها (لو كانت غلطة كتابة أو مش مهمة). */
+export async function dismissReviewedTerm(queueId: string) {
+  await db.delete(vocabularyReviewQueue).where(eq(vocabularyReviewQueue.id, queueId));
   revalidatePath("/admin/vocabulary");
 }
