@@ -3,7 +3,7 @@ import { CAR_BRANDS, COLORS, SAUDI_CITIES, SPECS, findModelInText } from "./carD
 import { db } from "@/db";
 import { parseCorrections } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { ensureVocabularyLoaded, findDynamicTerm, findDynamicModelAlias, getVocabCache } from "./vocabulary";
+import { ensureVocabularyLoaded, findDynamicTerm, findDynamicModelAlias, findDynamicBrandAlias, getVocabCache } from "./vocabulary";
 
 export type ParsedCar = {
   type: "demand" | "supply" | "unclear";
@@ -272,7 +272,14 @@ export function ruleBasedParse(rawText: string): ParsedCar {
   // أولاً: هل النص فيه صيغة بديلة اتعلمها البوت من الأدمن (زي "راف4")؟
   // لو آه بنفضلها لأنها مقصودة بالظبط، وإلا نرجع للقواعد الثابتة العادية.
   const alias = findDynamicModelAlias(normalized) ?? findDynamicModelAlias(cleaned);
-  const modelHit = alias ?? findModelInText(normalized) ?? findModelInText(cleaned);
+  const modelHit =
+    alias ??
+    findModelInText(normalized) ??
+    findModelInText(cleaned) ??
+    (() => {
+      const brandOnly = findDynamicBrandAlias(normalized) ?? findDynamicBrandAlias(cleaned);
+      return brandOnly ? { brand: brandOnly.brand, model: "" } : null;
+    })();
 
   const year = extractYear(cleaned);
   const city = extractCity(cleaned);

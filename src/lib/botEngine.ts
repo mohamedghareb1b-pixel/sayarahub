@@ -8,13 +8,15 @@ import {
   dailyCheckins,
   requests as requestsTable,
   inventory as inventoryTable,
+  vocabularyTerms,
 } from "@/db/schema";
 import { enqueueMessage, logInbound, type Button } from "./whatsapp";
 import { parseFreeText, extractFieldAnswer, lookupCorrection, saveCorrection, type ParsedCar } from "./parser";
 import { buildFingerprint } from "./fingerprint";
 import { runMatchingForRequest, runMatchingForInventory, confirmMatch, declineMatch } from "./matchingEngine";
-import { classifyKeyword } from "./textClean";
-import { SAUDI_CITIES } from "./carData";
+import { classifyKeyword, normalizeForMatch } from "./textClean";
+import { SAUDI_CITIES, CAR_BRANDS, COLORS, findModelInText } from "./carData";
+import { findDynamicBrandAlias, findDynamicTerm, getVocabCache } from "./vocabulary";
 
 type ConversationState = {
   step:
@@ -99,6 +101,64 @@ async function findShowroomBySimilarName(name: string) {
   }
 }
 
+/** الأزرار الثابتة اللي المفروض تظهر مع أي رسالة بترجع المستخدم لوضع
+ * "خمول" (يعني مفيش طلب شغال دلوقتي) — عشان يكون قدامه دايماً طريقة سريعة
+ * يبدأ بيها إدخال سيارة جديدة بدل ما يعتمد بس على الكتابة الحرة. */
+function idleMenuButtons(): Button[] {
+  return [
+    { id: "guided_supply", title: "🚗 عندي سيارة (متوفر)" },
+    { id: "guided_demand", title: "🔍 عايز سيارة (مطلوب)" },
+  ];
+}
+
+/** لو المستخدم في وضع "الإدخال اليدوي خطوة بخطوة" كتب قيمة مش معرّفة عندنا
+ * خالص (ماركة/موديل/فئة/لون جديد)، نسجلها تلقائياً في جدول المفردات —
+ * بكده النظام بيتعلم من الاستخدام الفعلي بدل ما يستنى حد يضيفها يدوي من
+ * /admin/vocabulary. الشرط: بنعمل ده بس في وضع الإدخال اليدوي (مش الكتابة
+ * الحرة العادية) عشان منعلمش النظام على حاجات غلط من رسائل مبهمة.
+ */
+async function autoLearnIfUnknown(field: string, rawAnswer: string, currentBrand: string | null) {
+  const value = rawAnswer.trim();
+  if (!value || value.length < 2) return;
+  const norm = normalizeForMatch(value);
+
+  try {
+    if (field === "brand") {
+      const known = CAR_BRANDS.some((b) => normalizeForMatch(b.brand) === norm) || findDynamicBrandAlias(norm);
+      if (known) return;
+      await db
+        .insert(vocabularyTerms)
+        .values({ category: "brand_alias", term: value, canonicalValue: value, brand: value })
+        .onConflictDoNothing();
+    } else if (field === "model" && currentBrand) {
+      const known = findModelInText(norm)?.model || findDynamicTerm(getVocabCache().trims, norm);
+      if (known) return;
+      await db
+        .insert(vocabularyTerms)
+        .values({ category: "model_alias", term: value, canonicalValue: value, brand: currentBrand, model: value })
+        .onConflictDoNothing();
+    } else if (field === "trim") {
+      const known = findDynamicTerm(getVocabCache().trims, norm);
+      if (known) return;
+      await db
+        .insert(vocabularyTerms)
+        .values({ category: "trim", term: value, canonicalValue: value })
+        .onConflictDoNothing();
+    } else if (field === "color") {
+      const knownStatic = COLORS.some((c) => normalizeForMatch(c) === norm);
+      const knownDynamic = findDynamicTerm(getVocabCache().colors, norm);
+      if (knownStatic || knownDynamic) return;
+      await db
+        .insert(vocabularyTerms)
+        .values({ category: "color", term: value, canonicalValue: value })
+        .onConflictDoNothing();
+    }
+  } catch {
+    // لو فشل التسجيل (مثلاً تعارض فريد)، نتجاهله بهدوء — الأولوية إن
+    // إدخال المستخدم نفسه يكمل عادي.
+  }
+}
+
 async function doCheckin(user: typeof users.$inferSelect) {
   const today = new Date().toISOString().slice(0, 10);
   await db
@@ -113,7 +173,7 @@ async function doCheckin(user: typeof users.$inferSelect) {
       freeWindowUntil: new Date(Date.now() + 24 * 60 * 60 * 1000),
     })
     .where(eq(users.id, user.id));
-  await reply(user.phone, "✅ تم تسجيل حضورك اليوم. بالتوفيق!", undefined, user.id);
+  await reply(user.phone, "✅ تم تسجيل حضورك اليوم. بالتوفيق!", idleMenuButtons(), user.id);
 }
 
 function notesForStorage(parsed: ParsedCar): string | null {
@@ -150,8 +210,8 @@ async function registerShowroom(user: typeof users.$inferSelect, pendingName: st
     .where(eq(users.id, user.id));
   await reply(
     user.phone,
-    `🎉 تم تسجيل معرض "${showroom.name}" في ${showroom.city}!\nأنت الآن مالك المعرض. يمكنك:\n- إرسال "اضف مندوب" لإضافة مندوب\n- إرسال أي سيارة متوفرة أو مطلوبة بشكل حر، مثال: "مطلوب كامري 2025 ابيض"\n- إرسال "صباح الخير" لتسجيل حضورك اليومي ✅`,
-    undefined,
+    `🎉 تم تسجيل معرض "${showroom.name}" في ${showroom.city}!\nأنت الآن مالك المعرض. اضغط زر "متوفر" أو "مطلوب" تحت عشان تبدأ تضيف أول سيارة:`,
+    idleMenuButtons(),
     user.id,
   );
 }
@@ -254,7 +314,7 @@ async function finalizeParsed(user: typeof users.$inferSelect, parsed: ParsedCar
     await reply(
       user.phone,
       `✅ تم إضافة السيارة لمخزونك: ${summarize(parsed)}\nستبقى متاحة 30 يوم أو حتى يتم توصيلها.`,
-      undefined,
+      idleMenuButtons(),
       user.id,
     );
     await runMatchingForInventory(invId);
@@ -263,12 +323,17 @@ async function finalizeParsed(user: typeof users.$inferSelect, parsed: ParsedCar
     await reply(
       user.phone,
       `🔎 تم تسجيل طلبك: ${summarize(parsed)}\nسنبحث لك في مخزون بقية المعارض وسنعلمك فور توفر تطابق. الطلب صالح 12 ساعة.`,
-      undefined,
+      idleMenuButtons(),
       user.id,
     );
     await runMatchingForRequest(reqId);
   } else {
-    await reply(user.phone, "لم أفهم إن كان هذا طلب أم عرض، أرسل مثلاً: مطلوب أو متوفر ثم تفاصيل السيارة.", undefined, user.id);
+    await reply(
+      user.phone,
+      "لم أفهم إن كان هذا طلب أم عرض، أرسل مثلاً: مطلوب أو متوفر ثم تفاصيل السيارة.",
+      idleMenuButtons(),
+      user.id,
+    );
   }
 }
 
@@ -301,8 +366,11 @@ async function handleFreeText(user: typeof users.$inferSelect, text: string) {
   if (parsed.type === "unclear" && parsed.missingFields.length >= 3) {
     await reply(
       user.phone,
-      "لم أفهم طلبك 🤔 حاول وصف السيارة بشكل أوضح مثل: مطلوب كامري 2025 أبيض الرياض",
-      undefined,
+      "لم أفهم طلبك 🤔 تقدر تجرب توصف السيارة تاني، أو ندخل بياناتها خطوة بخطوة:",
+      [
+        { id: "guided_supply", title: "🚗 عندي سيارة (متوفر)" },
+        { id: "guided_demand", title: "🔍 عايز سيارة (مطلوب)" },
+      ],
       user.id,
     );
     return;
@@ -381,6 +449,37 @@ export async function handleIncomingMessage(input: {
     }
 
     if (btn === "checkin") return doCheckin(user);
+
+    if (btn === "guided_supply" || btn === "guided_demand") {
+      const type: "supply" | "demand" = btn === "guided_supply" ? "supply" : "demand";
+      const empty: ParsedCar = {
+        type,
+        brand: null,
+        model: null,
+        year: null,
+        trim: null,
+        color: null,
+        interiorColor: null,
+        extraFeatures: null,
+        engineSize: null,
+        seats: null,
+        fuelType: null,
+        transmission: null,
+        spec: "سعودي",
+        city: null,
+        quantity: 1,
+        price: null,
+        confidence: 1,
+        missingFields: [],
+      };
+      // نبني قائمة الأسئلة بالترتيب: الحقول الأساسية دايماً، واللون كمان لو
+      // ده عرض سيارة (لازم يحدد الألوان المتوفرة عنده تحديداً).
+      const queue = ["brand", "model", "trim", "year", "city"];
+      if (type === "supply") queue.push("color");
+      await setState(user.id, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
+      await askNextMissingField(user, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
+      return;
+    }
 
     if (btn === "retry_showroom_search") {
       await setState(user.id, { step: "ask_showroom_search" });
@@ -709,6 +808,13 @@ export async function handleIncomingMessage(input: {
       const value = extractFieldAnswer(field, text);
       (parsed as Record<string, unknown>)[field] = value;
 
+      // في وضع "الإدخال اليدوي خطوة بخطوة" (مش الكتابة الحرة العادية)، لو
+      // القيمة دي مش معرّفة عندنا خالص، سجّلها تلقائياً كمفردة جديدة —
+      // بكده النظام "يتعلم" من كل إدخال يدوي بدون ما يحتاج تدخل يدوي منك.
+      if (st.pendingParsed.confidence === 1 && typeof value === "string") {
+        await autoLearnIfUnknown(field, value, parsed.brand);
+      }
+
       // كمان: أعد فحص الرد كامل، لأن المستخدم غالباً بيبعت كل التفاصيل مرة واحدة
       // (زي "تويوتا كامري ستاندر ابيض 2026 سعودي بالرياض") مش بس الحقل المطلوب
       const rescan = await parseFreeText(text);
@@ -769,8 +875,8 @@ export async function handleIncomingMessage(input: {
   if (text.length === 0) {
     await reply(
       user.phone,
-      "أرسل وصف السيارة (مطلوبة أو متوفرة)، أو 'صباح الخير' لتسجيل حضورك.",
-      undefined,
+      "أرسل وصف السيارة (مطلوبة أو متوفرة)، أو دوس على أحد الزرارين تحت، أو اكتب 'صباح الخير' لتسجيل حضورك.",
+      idleMenuButtons(),
       user.id,
     );
     return;

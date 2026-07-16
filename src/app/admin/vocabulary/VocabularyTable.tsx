@@ -17,6 +17,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   feature: "ملاحظة إضافية",
   model_alias: "موديل",
   stopword: "كلمة ممنوعة",
+  brand_alias: "ماركة",
 };
 
 const CATEGORY_COLOR: Record<string, string> = {
@@ -25,9 +26,10 @@ const CATEGORY_COLOR: Record<string, string> = {
   feature: "bg-amber-100 text-amber-700",
   model_alias: "bg-emerald-100 text-emerald-700",
   stopword: "bg-rose-100 text-rose-700",
+  brand_alias: "bg-teal-100 text-teal-700",
 };
 
-const CATEGORY_ORDER = ["model_alias", "trim", "color", "feature", "stopword"];
+const CATEGORY_ORDER = ["brand_alias", "model_alias", "trim", "color", "feature", "stopword"];
 
 export default function VocabularyTable({
   rows,
@@ -124,7 +126,7 @@ export default function VocabularyTable({
                 <tr>
                   <th className="px-4 py-2">النص المكتوب</th>
                   <th className="px-4 py-2">القيمة الرسمية</th>
-                  {cat === "model_alias" && <th className="px-4 py-2">الماركة/الموديل</th>}
+                  {(cat === "model_alias" || cat === "brand_alias") && <th className="px-4 py-2">الماركة/الموديل</th>}
                   <th className="px-4 py-2"></th>
                 </tr>
               </thead>
@@ -133,7 +135,7 @@ export default function VocabularyTable({
                   <tr key={r.id} className="border-t border-slate-100">
                     <td className="px-4 py-2 font-medium text-slate-900">{r.term}</td>
                     <td className="px-4 py-2 text-slate-600">{cat === "stopword" ? "—" : r.canonicalValue}</td>
-                    {cat === "model_alias" && (
+                    {(cat === "model_alias" || cat === "brand_alias") && (
                       <td className="px-4 py-2 text-slate-500">
                         {r.brand || r.model ? `${r.brand ?? ""} ${r.model ?? ""}`.trim() : "—"}
                       </td>

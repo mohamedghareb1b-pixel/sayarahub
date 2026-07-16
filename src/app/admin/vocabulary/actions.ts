@@ -8,36 +8,36 @@ import { revalidatePath } from "next/cache";
 export async function addVocabularyTerm(formData: FormData) {
   const category = String(formData.get("category") ?? "");
   const canonicalValue = String(formData.get("canonicalValue") ?? "").trim();
-  const brand = String(formData.get("brand") ?? "").trim();
-  const model = String(formData.get("model") ?? "").trim();
+  const brandInput = String(formData.get("brand") ?? "").trim();
 
-  if (!["trim", "color", "feature", "model_alias", "stopword"].includes(category)) return;
+  if (!["trim", "color", "feature", "model_alias", "stopword", "brand_alias"].includes(category)) return;
 
   // للموديل/الماركة بنقبل خانتين (عربي + إنجليزي) وبنسجل كل واحدة فيهم لوحدها
-  // لو موجودة، عشان أي حد يكتب أي صيغة من الاتنين يترجم لنفس الموديل الرسمي.
+  // لو موجودة، عشان أي حد يكتب أي صيغة من الاتنين يترجم لنفس القيمة الرسمية.
   const termAr = String(formData.get("term_ar") ?? formData.get("term") ?? "").trim();
   const termEn = String(formData.get("term_en") ?? "").trim();
   const terms = [termAr, termEn].filter(Boolean);
 
   if (terms.length === 0 || !canonicalValue) return;
 
+  // للموديل: الماركة بتيجي من الفورم، والموديل الرسمي هو نفسه القيمة الرسمية.
+  // للماركة المستقلة: مفيش موديل خالص، والماركة نفسها هي القيمة الرسمية.
+  const brand = category === "model_alias" ? brandInput : category === "brand_alias" ? canonicalValue : null;
+  const model = category === "model_alias" ? canonicalValue : null;
+
   for (const term of terms) {
     await db
       .insert(vocabularyTerms)
       .values({
-        category: category as "trim" | "color" | "feature" | "model_alias" | "stopword",
+        category: category as "trim" | "color" | "feature" | "model_alias" | "stopword" | "brand_alias",
         term,
         canonicalValue,
-        brand: category === "model_alias" ? brand || null : null,
-        model: category === "model_alias" ? model || null : null,
+        brand,
+        model,
       })
       .onConflictDoUpdate({
         target: [vocabularyTerms.term, vocabularyTerms.category],
-        set: {
-          canonicalValue,
-          brand: category === "model_alias" ? brand || null : null,
-          model: category === "model_alias" ? model || null : null,
-        },
+        set: { canonicalValue, brand, model },
       });
   }
 
@@ -62,7 +62,7 @@ export async function bulkAddVocabularyTerms(formData: FormData) {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const validCategories = new Set(["trim", "color", "feature", "model_alias", "stopword"]);
+  const validCategories = new Set(["trim", "color", "feature", "model_alias", "stopword", "brand_alias"]);
 
   for (const line of lines) {
     const parts = line.split(",").map((p) => p.trim());

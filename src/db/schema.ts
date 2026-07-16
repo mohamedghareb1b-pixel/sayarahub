@@ -287,6 +287,7 @@ export const vocabularyCategoryEnum = pgEnum("vocabulary_category", [
   "feature",
   "model_alias",
   "stopword",
+  "brand_alias",
 ]);
 
 export const vocabularyTerms = pgTable(

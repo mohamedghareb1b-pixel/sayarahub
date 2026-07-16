@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { inventory, showrooms } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { createManualInventoryItem } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -28,12 +29,82 @@ export default async function InventoryPage() {
     .orderBy(desc(inventory.createdAt))
     .limit(200);
 
+  const showroomList = await db
+    .select({ id: showrooms.id, name: showrooms.name, city: showrooms.city })
+    .from(showrooms)
+    .orderBy(showrooms.name);
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">المخزون</h1>
         <p className="mt-1 text-slate-600">جميع السيارات المضافة عبر البوت أو الرسائل الخام. صلاحية 30 يوم.</p>
       </div>
+
+      {/* إضافة سيارة يدوياً بخانات منفصلة */}
+      <form action={createManualInventoryItem} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+        <h2 className="font-semibold text-slate-900">➕ إضافة سيارة يدوياً</h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">المعرض</label>
+            <select name="showroomId" required className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+              <option value="">اختر المعرض</option>
+              {showroomList.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} — {s.city}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">الماركة</label>
+            <input name="brand" required placeholder="تويوتا" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">الموديل</label>
+            <input name="model" required placeholder="كامري" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">الفئة (اختياري)</label>
+            <input name="trim" placeholder="ستاندر" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">سنة الصنع</label>
+            <input name="year" type="number" required placeholder="2026" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">اللون (اختياري)</label>
+            <input name="color" placeholder="أبيض" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">اللون الداخلي (اختياري)</label>
+            <input name="interiorColor" placeholder="أسود" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">المدينة</label>
+            <input name="city" required placeholder="الرياض" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">الوكيل (اختياري — سعودي افتراضياً)</label>
+            <input name="spec" placeholder="سعودي" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">السعر (اختياري)</label>
+            <input name="price" type="number" placeholder="120000" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-600">كم قطعة متوفرة</label>
+            <input name="quantity" type="number" defaultValue={1} min={1} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div className="sm:col-span-3">
+            <label className="mb-1 block text-sm text-slate-600">ملاحظات (اختياري)</label>
+            <input name="extraFeatures" placeholder="دبل، سقف اسود..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <button type="submit" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+          إضافة للمخزون
+        </button>
+      </form>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full text-sm">

@@ -25,69 +25,54 @@ export default async function VocabularyPage() {
         <h2 className="font-semibold text-slate-900">🚗 إضافة موديل</h2>
         <p className="text-xs text-slate-500">
           لموديل جديد لماركة عندنا بالفعل، أو صياغة/اختصار بديل لموديل موجود (زي &quot;راف4&quot;).
-          اكتب الاسم بالعربي و/أو بالإنجليزي — أي حد يكتب أي صيغة منهم هيتفهم صح.
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm text-slate-600">النص بالعربي</label>
-            <input name="term_ar" placeholder="مثال: جي 7" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <input name="term_ar" placeholder="مثال: راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-600">النص بالإنجليزي</label>
-            <input name="term_en" placeholder="مثال: G7" dir="ltr" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <label className="mb-1 block text-sm text-slate-600">النص بالإنجليزي (اختياري)</label>
+            <input name="term_en" placeholder="مثال: RAV4" dir="ltr" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           </div>
           <div>
             <label className="mb-1 block text-sm text-slate-600">الماركة</label>
             <input name="brand" placeholder="تويوتا" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الموديل الرسمي</label>
-            <input name="model" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية (نفس اسم الموديل)</label>
+            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية للموديل</label>
             <input name="canonicalValue" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
         </div>
-        <p className="text-xs text-slate-400">لازم تملأ خانة واحدة على الأقل من العربي/الإنجليزي.</p>
         <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
           إضافة الموديل
         </button>
       </form>
 
-      {/* إضافة ماركة جديدة تماماً (مع أول موديل ليها) */}
+      {/* إضافة ماركة (مستقلة، من غير حاجة لموديل) */}
       <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-        <input type="hidden" name="category" value="model_alias" />
-        <h2 className="font-semibold text-slate-900">🏷️ إضافة ماركة جديدة</h2>
+        <input type="hidden" name="category" value="brand_alias" />
+        <h2 className="font-semibold text-slate-900">🏷️ إضافة ماركة</h2>
         <p className="text-xs text-slate-500">
-          ماركة مش موجودة عندنا خالص (زي بيجو، MG، إلخ). اكتب أول موديل ليها بالعربي و/أو بالإنجليزي، وتقدر تضيف
-          باقي موديلاتها بعدين من خانة &quot;إضافة موديل&quot; فوق. مثال: النص العربي &quot;ام جي 7&quot;، الإنجليزي &quot;MG G7&quot;.
+          تسجيل اسم ماركة (عربي/إنجليزي) لوحده، من غير ما تحتاج تحدد موديل معين. مفيد لو عايز النظام يتعرف على
+          الماركة نفسها حتى لو الموديل مش مسجل عندنا.
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الماركة الجديدة</label>
-            <input name="brand" placeholder="بيجو" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+            <label className="mb-1 block text-sm text-slate-600">اسم الماركة بالعربي</label>
+            <input name="term_ar" placeholder="مثال: ام جي" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الموديل الرسمي</label>
-            <input name="model" placeholder="3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الموديل بالعربي</label>
-            <input name="term_ar" placeholder="مثال: ٣٠٠٨" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الموديل بالإنجليزي</label>
-            <input name="term_en" placeholder="مثال: 3008" dir="ltr" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <label className="mb-1 block text-sm text-slate-600">اسم الماركة بالإنجليزي (اختياري)</label>
+            <input name="term_en" placeholder="مثال: MG" dir="ltr" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           </div>
           <div className="sm:col-span-2">
-            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية (نفس اسم الموديل)</label>
-            <input name="canonicalValue" placeholder="3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية للماركة</label>
+            <input name="canonicalValue" placeholder="ام جي" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
           </div>
         </div>
-        <p className="text-xs text-slate-400">لازم تملأ خانة واحدة على الأقل من العربي/الإنجليزي.</p>
         <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة الماركة والموديل
+          إضافة الماركة
         </button>
       </form>
 
