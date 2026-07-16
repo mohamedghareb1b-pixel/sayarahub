@@ -1,198 +1,92 @@
 import { db } from "@/db";
-import { vocabularyTerms } from "@/db/schema";
-import { desc } from "drizzle-orm";
-import { addVocabularyTerm, deleteVocabularyTerm, bulkAddVocabularyTerms } from "./actions";
-import VocabularyTable from "./VocabularyTable";
+import { sql } from "drizzle-orm";
+import {
+  showrooms,
+  users,
+  inventory,
+  requests,
+  matches,
+  messageQueue,
+  rawImports,
+} from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
-export default async function VocabularyPage() {
-  const rows = await db.select().from(vocabularyTerms).orderBy(desc(vocabularyTerms.createdAt));
+async function scalar(query: ReturnType<typeof sql>) {
+  const res = await db.execute<{ count: string }>(query);
+  return Number(res.rows[0]?.count ?? 0);
+}
+
+export default async function AdminDashboard() {
+  const [
+    showroomCount,
+    activeToday,
+    openRequests,
+    availableCars,
+    connectedMatches,
+    pendingQueue,
+    pendingRawImports,
+    totalSalespeople,
+  ] = await Promise.all([
+    scalar(sql`select count(*) from ${showrooms}`),
+    scalar(sql`select count(*) from ${users} where is_active_today = true`),
+    scalar(sql`select count(*) from ${requests} where status = 'open'`),
+    scalar(sql`select count(*) from ${inventory} where status = 'available'`),
+    scalar(sql`select count(*) from ${matches} where status = 'connected'`),
+    scalar(sql`select count(*) from ${messageQueue} where status in ('pending','retry')`),
+    scalar(sql`select count(*) from ${rawImports} where status in ('pending','pending_ai')`),
+    scalar(sql`select count(*) from ${users} where role = 'sales'`),
+  ]);
+
+  const cards = [
+    { label: "المعارض المسجلة", value: showroomCount, color: "bg-emerald-50 text-emerald-700" },
+    { label: "نشطون اليوم (نافذة مجانية)", value: activeToday, color: "bg-sky-50 text-sky-700" },
+    { label: "طلبات مفتوحة", value: openRequests, color: "bg-amber-50 text-amber-700" },
+    { label: "سيارات متاحة", value: availableCars, color: "bg-indigo-50 text-indigo-700" },
+    { label: "مطابقات مؤكدة", value: connectedMatches, color: "bg-emerald-50 text-emerald-700" },
+    { label: "رسائل بالطابور", value: pendingQueue, color: "bg-rose-50 text-rose-700" },
+    { label: "رسائل خام بانتظار المعالجة", value: pendingRawImports, color: "bg-orange-50 text-orange-700" },
+    { label: "إجمالي المناديب", value: totalSalespeople, color: "bg-slate-100 text-slate-700" },
+  ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">مفردات البوت</h1>
+        <h1 className="text-2xl font-bold text-slate-900">لوحة التحكم</h1>
         <p className="mt-1 text-slate-600">
-          علّم البوت كلمات وصيغ جديدة (أسماء موديلات بديلة، فئات، ألوان، ملاحظات) بدون تعديل الكود.
-          التغييرات بتنعكس خلال دقيقة تقريباً.
+          دور المنصة ينتهي عند توصيل معرض يطلب سيارة بمعرض عنده السيارة. لا تسعير، لا تفاوض، لا عمولة.
         </p>
       </div>
 
-      {/* إضافة موديل لماركة موجودة بالفعل */}
-      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-        <input type="hidden" name="category" value="model_alias" />
-        <h2 className="font-semibold text-slate-900">🚗 إضافة موديل</h2>
-        <p className="text-xs text-slate-500">
-          لموديل جديد لماركة عندنا بالفعل، أو صياغة/اختصار بديل لموديل موجود (زي &quot;راف4&quot;).
-          اكتب الاسم بالعربي و/أو بالإنجليزي — أي حد يكتب أي صيغة منهم هيتفهم صح.
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        {cards.map((c) => (
+          <div key={c.label} className={`rounded-2xl p-5 shadow-sm ${c.color}`}>
+            <p className="text-sm font-medium opacity-80">{c.label}</p>
+            <p className="mt-2 text-3xl font-bold">{c.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        <h2 className="text-lg font-semibold text-slate-900">التكلفة التقديرية الشهرية</h2>
+        <div className="mt-4 grid grid-cols-1 gap-4 text-sm text-slate-600 md:grid-cols-3">
+          <div className="rounded-xl bg-slate-50 p-4">
+            <p className="font-medium text-slate-900">قاعدة البيانات + الاستضافة</p>
+            <p className="mt-1">~94 ريال / شهر</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-4">
+            <p className="font-medium text-slate-900">قارئ الجروبات (VPS)</p>
+            <p className="mt-1">~19 ريال / شهر</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-4">
+            <p className="font-medium text-slate-900">Gemini 2.0 Flash + واتساب</p>
+            <p className="mt-1">~55 ريال / شهر</p>
+          </div>
+        </div>
+        <p className="mt-4 text-sm text-slate-500">
+          هامش ربح متوقع ~98% عند 100 معرض مشترك بخطة Pro (50 ريال/رقم/شهر).
         </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">النص بالعربي</label>
-            <input name="term_ar" placeholder="مثال: جي 7" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">النص بالإنجليزي</label>
-            <input name="term_en" placeholder="مثال: G7" dir="ltr" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">الماركة</label>
-            <input name="brand" placeholder="تويوتا" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الموديل الرسمي</label>
-            <input name="model" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية (نفس اسم الموديل)</label>
-            <input name="canonicalValue" placeholder="راف فور" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-        </div>
-        <p className="text-xs text-slate-400">لازم تملأ خانة واحدة على الأقل من العربي/الإنجليزي.</p>
-        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة الموديل
-        </button>
-      </form>
-
-      {/* إضافة ماركة جديدة تماماً (مع أول موديل ليها) */}
-      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-        <input type="hidden" name="category" value="model_alias" />
-        <h2 className="font-semibold text-slate-900">🏷️ إضافة ماركة جديدة</h2>
-        <p className="text-xs text-slate-500">
-          ماركة مش موجودة عندنا خالص (زي بيجو، MG، إلخ). اكتب أول موديل ليها بالعربي و/أو بالإنجليزي، وتقدر تضيف
-          باقي موديلاتها بعدين من خانة &quot;إضافة موديل&quot; فوق. مثال: النص العربي &quot;ام جي 7&quot;، الإنجليزي &quot;MG G7&quot;.
-        </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الماركة الجديدة</label>
-            <input name="brand" placeholder="بيجو" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الموديل الرسمي</label>
-            <input name="model" placeholder="3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الموديل بالعربي</label>
-            <input name="term_ar" placeholder="مثال: ٣٠٠٨" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">اسم الموديل بالإنجليزي</label>
-            <input name="term_en" placeholder="مثال: 3008" dir="ltr" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية (نفس اسم الموديل)</label>
-            <input name="canonicalValue" placeholder="3008" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-        </div>
-        <p className="text-xs text-slate-400">لازم تملأ خانة واحدة على الأقل من العربي/الإنجليزي.</p>
-        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة الماركة والموديل
-        </button>
-      </form>
-
-      {/* إضافة فئة */}
-      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-        <input type="hidden" name="category" value="trim" />
-        <h2 className="font-semibold text-slate-900">⚙️ إضافة فئة</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه</label>
-            <input name="term" placeholder="مثال: كمفرت" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية</label>
-            <input name="canonicalValue" placeholder="مثال: كمفورت" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-        </div>
-        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة الفئة
-        </button>
-      </form>
-
-      {/* إضافة لون */}
-      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-        <input type="hidden" name="category" value="color" />
-        <h2 className="font-semibold text-slate-900">🎨 إضافة لون</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه</label>
-            <input name="term" placeholder="مثال: لولوي" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية</label>
-            <input name="canonicalValue" placeholder="مثال: جملي" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-        </div>
-        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة اللون
-        </button>
-      </form>
-
-      {/* إضافة ملاحظة */}
-      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-        <input type="hidden" name="category" value="feature" />
-        <h2 className="font-semibold text-slate-900">📝 إضافة ملاحظة</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">النص اللي المستخدم بيكتبه</label>
-            <input name="term" placeholder="مثال: سقف اسود" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">القيمة الرسمية</label>
-            <input name="canonicalValue" placeholder="مثال: سقف اسود" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-          </div>
-        </div>
-        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة الملاحظة
-        </button>
-      </form>
-
-      {/* إضافة كلمة ممنوعة (متتسجلش في الملاحظات خالص حتى لو معرفناهاش) */}
-      <form action={addVocabularyTerm} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
-        <input type="hidden" name="category" value="stopword" />
-        <h2 className="font-semibold text-slate-900">🚫 كلمة ممنوعة (Stopword)</h2>
-        <p className="text-xs text-slate-500">
-          كلمات زي &quot;اللون&quot; أو &quot;موديل&quot; بيكتبها الناس أحياناً بدون فايدة حقيقية — أضفها هنا عشان متظهرش في الملاحظات أبداً.
-        </p>
-        <div className="flex gap-3">
-          <input
-            name="term"
-            placeholder="مثال: اللون"
-            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            required
-          />
-          {/* القيمة الرسمية مش لها معنى هنا، بس محتاجينها تقنياً — بنملاها تلقائي بنفس الكلمة */}
-          <input type="hidden" name="canonicalValue" value="-" />
-          <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-            إضافة كممنوعة
-          </button>
-        </div>
-      </form>
-
-      {/* إضافة بالجملة (لصق عدة مصطلحات دفعة واحدة) */}
-      <form action={bulkAddVocabularyTerms} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
-        <h2 className="font-semibold text-slate-900">إضافة بالجملة (Bulk Add)</h2>
-        <p className="text-xs text-slate-500">
-          سطر لكل مصطلح، بالصيغة: <code dir="ltr" className="rounded bg-slate-100 px-1">النوع,النص المكتوب,القيمة الرسمية[,الماركة,الموديل]</code>
-          <br />
-          النوع يكون واحد من: trim / color / feature / model_alias (النوع اللي اسمه في الواجهة &quot;موديل&quot;)
-        </p>
-        <textarea
-          name="bulkText"
-          rows={6}
-          required
-          placeholder={`trim,كمفرت,كمفورت\ncolor,لولوي,جملي\nfeature,سقف اسود,سقف اسود\nmodel_alias,راف4,راف فور,تويوتا,راف فور`}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm"
-          dir="ltr"
-        />
-        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة الكل
-        </button>
-      </form>
-
-      {/* الجدول (بحث + أقسام) */}
-      <VocabularyTable rows={rows} onDelete={deleteVocabularyTerm} />
+      </div>
     </div>
   );
 }
