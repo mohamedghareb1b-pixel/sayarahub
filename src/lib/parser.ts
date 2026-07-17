@@ -144,7 +144,7 @@ function extractInteriorColor(text: string): string | null {
 
 // كلمات وصفات إضافية شائعة في سوق السيارات السعودي، لا تدخل ضمن الحقول
 // الأساسية لكنها مهمة كملاحظة جانبية (دبل، فتحة، كاميرا...الخ)
-const EXTRA_FEATURE_WORDS = [
+export const EXTRA_FEATURE_WORDS = [
   "دبل", "بدون دبل",
   "فتحة", "بدون فتحة", "فتحتين",
   "كاميرا خلفية", "كاميرا 360", "كاميرا",

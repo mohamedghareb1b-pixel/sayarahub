@@ -14,7 +14,28 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function ShowroomsPage() {
+export default async function ShowroomsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ phone?: string }>;
+}) {
+  const { phone: phoneQuery } = await searchParams;
+  const phoneResults = phoneQuery
+    ? await db
+        .select({
+          id: users.id,
+          name: users.name,
+          phone: users.phone,
+          role: users.role,
+          showroomId: users.showroomId,
+          showroomName: showrooms.name,
+          showroomCity: showrooms.city,
+        })
+        .from(users)
+        .leftJoin(showrooms, eq(users.showroomId, showrooms.id))
+        .where(sql`${users.phone} ilike ${"%" + phoneQuery.replace(/[^\d+]/g, "") + "%"}`)
+    : [];
+
   const rows = await db.select().from(showrooms).orderBy(desc(showrooms.createdAt));
 
   const allStaff = await db
@@ -56,6 +77,46 @@ export default async function ShowroomsPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">المعارض</h1>
         <p className="mt-1 text-slate-600">إدارة المعارض المسجلة، حالة الاشتراك، والتفعيل/الحظر.</p>
+      </div>
+
+      {/* بحث برقم الهاتف — يوري تابع لأي معرض ودوره (صاحب/مندوب) */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+        <h2 className="font-semibold text-slate-900">🔍 بحث برقم الهاتف</h2>
+        <form method="GET" className="flex gap-2">
+          <input
+            name="phone"
+            defaultValue={phoneQuery ?? ""}
+            placeholder="مثال: 9665..."
+            dir="ltr"
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+            بحث
+          </button>
+        </form>
+        {phoneQuery && (
+          <div className="space-y-2">
+            {phoneResults.length === 0 && <p className="text-sm text-slate-400">مفيش أي حساب برقم يحتوي على &quot;{phoneQuery}&quot;.</p>}
+            {phoneResults.map((r) => (
+              <div key={r.id} className="rounded-lg border border-slate-200 p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span dir="ltr" className="font-medium text-slate-900">{r.phone}</span>
+                  <span className="text-slate-500">{r.name ?? "بدون اسم"}</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                    {r.role === "owner" ? "صاحب معرض" : r.role === "sales" ? "مندوب" : r.role}
+                  </span>
+                </div>
+                <p className="mt-1 text-slate-600">
+                  {r.showroomName ? (
+                    <>تابع لمعرض: <strong>{r.showroomName}</strong> — {r.showroomCity}</>
+                  ) : (
+                    "مش تابع لأي معرض حالياً"
+                  )}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* تسجيل مسبق لمعرض قبل ما صاحبه يتواصل مع البوت خالص */}

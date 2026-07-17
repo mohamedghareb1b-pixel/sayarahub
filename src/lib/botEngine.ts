@@ -12,7 +12,7 @@ import {
   vocabularyReviewQueue,
 } from "@/db/schema";
 import { enqueueMessage, logInbound, type Button } from "./whatsapp";
-import { parseFreeText, extractFieldAnswer, lookupCorrection, saveCorrection, type ParsedCar } from "./parser";
+import { parseFreeText, extractFieldAnswer, lookupCorrection, saveCorrection, EXTRA_FEATURE_WORDS, type ParsedCar } from "./parser";
 import { buildFingerprint } from "./fingerprint";
 import { runMatchingForRequest, runMatchingForInventory, confirmMatch, declineMatch } from "./matchingEngine";
 import { classifyKeyword, normalizeForMatch } from "./textClean";
@@ -45,10 +45,11 @@ const FIELD_QUESTIONS: Record<string, string> = {
   model: "ما هو موديل السيارة؟ (مثال: كامري)",
   year: "ما هي سنة الصنع؟ (مثال: 2025)",
   city: "في أي مدينة؟ (مثال: الرياض)",
-  trim: "ما هي الفئة/الدرجة؟ (مثال: ستاندر، فل كامل، كمفورت)",
-  color: "ما هي الألوان المتوفرة لديك؟ (لازم تحدد اللون عشان تعرضها للمعارض الأخرى)",
-  spec: "ما هي المواصفة/الوكيل؟ (مثال: سعودي، خليجي، أمريكي)",
-  extraFeatures: "اكتب الملاحظات الجديدة (مثال: دبل، سقف اسود، داخلي بيج):",
+  trim: "ما هي الفئة/الدرجة؟ ينفع تكتب أكتر من فئة مفصولين بـ / أو - (مثال: ستاندر/فل كامل)",
+  color: "ما هي الألوان المتوفرة؟ ينفع تكتب أكتر من لون مفصولين بـ / أو - (مثال: أبيض/أحمر)",
+  spec: "ما هي المواصفة/الوكيل؟ (مثال: سعودي، خليجي، أمريكي) — أو اكتب - للتخطي (هتبقى سعودي تلقائياً)",
+  extraFeatures:
+    "في ملاحظات تحب تضيفها؟ افصل بين كل ملاحظة والتانية بـ - (مثال: دبل - سقف اسود) — أو اكتب - للتخطي بدون ملاحظات",
 };
 
 const EDITABLE_FIELD_LABELS: { field: string; label: string }[] = [
@@ -123,11 +124,12 @@ async function flagUnknownTermForReview(field: string, rawAnswer: string, curren
   if (!value || value.length < 2) return;
   const norm = normalizeForMatch(value);
 
-  const categoryMap: Record<string, "brand_alias" | "model_alias" | "trim" | "color"> = {
+  const categoryMap: Record<string, "brand_alias" | "model_alias" | "trim" | "color" | "feature"> = {
     brand: "brand_alias",
     model: "model_alias",
     trim: "trim",
     color: "color",
+    feature: "feature",
   };
   const category = categoryMap[field];
   if (!category) return;
@@ -142,6 +144,10 @@ async function flagUnknownTermForReview(field: string, rawAnswer: string, curren
       known = Boolean(findDynamicTerm(getVocabCache().trims, norm));
     } else if (field === "color") {
       known = COLORS.some((c) => normalizeForMatch(c) === norm) || Boolean(findDynamicTerm(getVocabCache().colors, norm));
+    } else if (field === "feature") {
+      known =
+        EXTRA_FEATURE_WORDS.some((w) => normalizeForMatch(w) === norm) ||
+        Boolean(findDynamicTerm(getVocabCache().features, norm));
     }
     if (known) return;
 
@@ -481,10 +487,9 @@ export async function handleIncomingMessage(input: {
         confidence: 1,
         missingFields: [],
       };
-      // نبني قائمة الأسئلة بالترتيب: الحقول الأساسية دايماً، واللون كمان لو
-      // ده عرض سيارة (لازم يحدد الألوان المتوفرة عنده تحديداً).
-      const queue = ["brand", "model", "trim", "year", "city"];
-      if (type === "supply") queue.push("color");
+      // الترتيب المطلوب بالظبط: ماركة، موديل، فئة، سنة الصنع، لون، الوكيل،
+      // المدينة، ملاحظات — بنسألهم كلهم بنفس الترتيب ده في كل مرة.
+      const queue = ["brand", "model", "trim", "year", "color", "spec", "city", "extraFeatures"];
       await setState(user.id, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
       await askNextMissingField(user, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
       return;
@@ -811,33 +816,50 @@ export async function handleIncomingMessage(input: {
     const queue = [...(st.missingFieldQueue ?? [])];
     const field = queue.shift();
     const parsed = { ...st.pendingParsed } as ParsedCar & Record<string, unknown>;
+    const isGuidedMode = st.pendingParsed.confidence === 1;
+    const rawAnswer = text.trim();
+    const skipped = isGuidedMode && (rawAnswer === "-" || rawAnswer === "" || rawAnswer === "تخطي" || rawAnswer === "لا");
 
-    if (field) {
+    if (field && skipped) {
+      // سؤال اختياري اتخطى (زي الوكيل أو الملاحظات) — نسيب القيمة الحالية
+      // زي ما هي (مثلاً الوكيل يفضل "سعودي" الافتراضي) وننتقل للسؤال اللي بعده.
+    } else if (field && isGuidedMode && ["color", "trim", "extraFeatures"].includes(field)) {
+      // الحقول اللي ممكن يكون فيها أكتر من قيمة مفصولة بـ / أو - (زي لونين
+      // أو ملاحظتين): نقسمهم، نتحقق من كل واحدة لوحدها، ونسجل أي حاجة
+      // مجهولة في قايمة المراجعة كل واحدة على حدة بدل ما تتحط كتلة واحدة.
+      const parts = rawAnswer
+        .split(/[\/\-]/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      for (const part of parts) {
+        await flagUnknownTermForReview(field === "extraFeatures" ? "feature" : field, part, parsed.brand);
+      }
+      (parsed as Record<string, unknown>)[field] = parts.length > 0 ? parts.join("، ") : null;
+    } else if (field) {
       // استخرج القيمة الصح للحقل المطلوب من رد المستخدم (بدل تخزين النص الخام)
       const value = extractFieldAnswer(field, text);
       (parsed as Record<string, unknown>)[field] = value;
 
       // في وضع "الإدخال اليدوي خطوة بخطوة" (مش الكتابة الحرة العادية)، لو
-      // القيمة دي مش معرّفة عندنا خالص، سجّلها تلقائياً كمفردة جديدة —
-      // بكده النظام "يتعلم" من كل إدخال يدوي بدون ما يحتاج تدخل يدوي منك.
-      if (st.pendingParsed.confidence === 1 && typeof value === "string") {
+      // القيمة دي مش معرّفة عندنا خالص، نسجلها في قايمة المراجعة.
+      if (isGuidedMode && typeof value === "string") {
         await flagUnknownTermForReview(field, value, parsed.brand);
       }
 
-      // كمان: أعد فحص الرد كامل، لأن المستخدم غالباً بيبعت كل التفاصيل مرة واحدة
-      // (زي "تويوتا كامري ستاندر ابيض 2026 سعودي بالرياض") مش بس الحقل المطلوب
-      const rescan = await parseFreeText(text);
-      const fieldsToFill: (keyof ParsedCar)[] = ["brand", "model", "year", "trim", "color", "spec", "city"];
-      for (const f of fieldsToFill) {
-        if (!parsed[f] && rescan[f]) {
-          (parsed as Record<string, unknown>)[f] = rescan[f];
+      // إعادة فحص الرد كامل مفيدة بس في وضع الكتابة الحرة (مش الإدخال
+      // اليدوي المُرتّب) — عشان منكسرش الترتيب الثابت اللي طلبناه.
+      if (!isGuidedMode) {
+        const rescan = await parseFreeText(text);
+        const fieldsToFill: (keyof ParsedCar)[] = ["brand", "model", "year", "trim", "color", "spec", "city"];
+        for (const f of fieldsToFill) {
+          if (!parsed[f] && rescan[f]) {
+            (parsed as Record<string, unknown>)[f] = rescan[f];
+          }
         }
+        const stillMissing = queue.filter((q) => !parsed[q as keyof ParsedCar]);
+        queue.length = 0;
+        queue.push(...stillMissing);
       }
-
-      // شيل من قايمة الأسئلة أي حقل اتملى فعلاً من إعادة الفحص
-      const stillMissing = queue.filter((q) => !parsed[q as keyof ParsedCar]);
-      queue.length = 0;
-      queue.push(...stillMissing);
     }
 
     await askNextMissingField(user, { step: "ask_missing_field", pendingParsed: parsed, originalText: st.originalText, missingFieldQueue: queue });
