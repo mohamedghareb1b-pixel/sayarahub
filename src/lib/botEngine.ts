@@ -110,8 +110,13 @@ function idleMenuButtons(): Button[] {
   return [
     { id: "guided_supply", title: "🚗 عندي سيارة (متوفر)" },
     { id: "guided_demand", title: "🔍 عايز سيارة (مطلوب)" },
+    { id: "excel_via_admin", title: "📊 عندي ملف إكسل" },
   ];
 }
+
+// رقم واتساب الأدمن اللي بيستقبل ملفات الإكسل ويرفعها بنفسه من لوحة التحكم
+// بدل ما نبني استقبال ملفات معقّد جوه واتساب مباشرة.
+const ADMIN_EXCEL_PHONE = "201125472360";
 
 /** لو المستخدم في وضع "الإدخال اليدوي خطوة بخطوة" كتب قيمة مش معرّفة عندنا
  * خالص (ماركة/موديل/فئة/لون جديد)، بنسجلها في "قايمة انتظار مراجعة" — الطلب
@@ -382,10 +387,7 @@ async function handleFreeText(user: typeof users.$inferSelect, text: string) {
     await reply(
       user.phone,
       "لم أفهم طلبك 🤔 تقدر تجرب توصف السيارة تاني، أو ندخل بياناتها خطوة بخطوة:",
-      [
-        { id: "guided_supply", title: "🚗 عندي سيارة (متوفر)" },
-        { id: "guided_demand", title: "🔍 عايز سيارة (مطلوب)" },
-      ],
+      idleMenuButtons(),
       user.id,
     );
     return;
@@ -464,6 +466,16 @@ export async function handleIncomingMessage(input: {
     }
 
     if (btn === "checkin") return doCheckin(user);
+
+    if (btn === "excel_via_admin") {
+      await reply(
+        user.phone,
+        `📊 تمام! ابعت ملف الإكسل بتاعك مباشرة على الرقم ده وهنرفعه لمخزونك بأنفسنا:\n\nwa.me/${ADMIN_EXCEL_PHONE}\n\n(لازم يكون الملف بنفس قالبنا الرسمي عشان نقدر نرفعه صح)`,
+        idleMenuButtons(),
+        user.id,
+      );
+      return;
+    }
 
     if (btn === "guided_supply" || btn === "guided_demand") {
       const type: "supply" | "demand" = btn === "guided_supply" ? "supply" : "demand";

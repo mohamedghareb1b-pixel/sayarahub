@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { inventory, showrooms } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { createManualInventoryItem } from "./actions";
+import ExcelUploadForm from "./ExcelUploadForm";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +106,8 @@ export default async function InventoryPage() {
           إضافة للمخزون
         </button>
       </form>
+
+      <ExcelUploadForm showroomList={showroomList} />
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full text-sm">
