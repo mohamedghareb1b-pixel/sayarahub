@@ -1,25 +1,26 @@
 import { db } from "@/db";
 import { showrooms, users, inventory } from "@/db/schema";
-import { desc, eq, and, sql } from "drizzle-orm";
+import { asc, eq, and, sql, ilike } from "drizzle-orm";
 import {
   toggleShowroomActive,
   setSubscriptionPlan,
-  createPresetShowroom,
-  addPresetSalesRep,
   updateUserName,
   removeUserFromShowroom,
   deleteUserAccount,
   deleteShowroom,
 } from "./actions";
+import RegistrationToggle from "./RegistrationToggle";
+import AddRepInline from "./AddRepInline";
 
 export const dynamic = "force-dynamic";
 
 export default async function ShowroomsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ phone?: string }>;
+  searchParams: Promise<{ phone?: string; name?: string }>;
 }) {
-  const { phone: phoneQuery } = await searchParams;
+  const { phone: phoneQuery, name: nameQuery } = await searchParams;
+
   const phoneResults = phoneQuery
     ? await db
         .select({
@@ -36,7 +37,12 @@ export default async function ShowroomsPage({
         .where(sql`${users.phone} ilike ${"%" + phoneQuery.replace(/[^\d+]/g, "") + "%"}`)
     : [];
 
-  const rows = await db.select().from(showrooms).orderBy(desc(showrooms.createdAt));
+  // ترتيب أبجدي بالاسم بدل الأحدث أولاً
+  const rows = await db
+    .select()
+    .from(showrooms)
+    .where(nameQuery ? ilike(showrooms.name, `%${nameQuery}%`) : undefined)
+    .orderBy(asc(showrooms.name));
 
   const allStaff = await db
     .select({
@@ -58,13 +64,6 @@ export default async function ShowroomsPage({
     staffByShowroom.set(s.showroomId, list);
   }
 
-  const staffCounts = await db
-    .select({ showroomId: users.showroomId, count: sql<number>`count(*)::int` })
-    .from(users)
-    .where(eq(users.role, "sales"))
-    .groupBy(users.showroomId);
-  const staffMap = new Map(staffCounts.map((s) => [s.showroomId, s.count]));
-
   const invCounts = await db
     .select({ showroomId: inventory.showroomId, count: sql<number>`count(*)::int` })
     .from(inventory)
@@ -79,7 +78,10 @@ export default async function ShowroomsPage({
         <p className="mt-1 text-slate-600">إدارة المعارض المسجلة، حالة الاشتراك، والتفعيل/الحظر.</p>
       </div>
 
-      {/* بحث برقم الهاتف — يوري تابع لأي معرض ودوره (صاحب/مندوب) */}
+      {/* تسجيل معرض جديد أو مندوب حر — فوق عشان يكون أول حاجة تتعمل */}
+      <RegistrationToggle />
+
+      {/* بحث برقم الهاتف */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
         <h2 className="font-semibold text-slate-900">🔍 بحث برقم الهاتف</h2>
         <form method="GET" className="flex gap-2">
@@ -96,7 +98,9 @@ export default async function ShowroomsPage({
         </form>
         {phoneQuery && (
           <div className="space-y-2">
-            {phoneResults.length === 0 && <p className="text-sm text-slate-400">مفيش أي حساب برقم يحتوي على &quot;{phoneQuery}&quot;.</p>}
+            {phoneResults.length === 0 && (
+              <p className="text-sm text-slate-400">مفيش أي حساب برقم يحتوي على &quot;{phoneQuery}&quot;.</p>
+            )}
             {phoneResults.map((r) => (
               <div key={r.id} className="rounded-lg border border-slate-200 p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
@@ -108,7 +112,9 @@ export default async function ShowroomsPage({
                 </div>
                 <p className="mt-1 text-slate-600">
                   {r.showroomName ? (
-                    <>تابع لمعرض: <strong>{r.showroomName}</strong> — {r.showroomCity}</>
+                    <>
+                      تابع لمعرض: <strong>{r.showroomName}</strong> — {r.showroomCity}
+                    </>
                   ) : (
                     "مش تابع لأي معرض حالياً"
                   )}
@@ -119,42 +125,26 @@ export default async function ShowroomsPage({
         )}
       </div>
 
-      {/* تسجيل مسبق لمعرض قبل ما صاحبه يتواصل مع البوت خالص */}
-      <form action={createPresetShowroom} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
-        <h2 className="font-semibold text-slate-900">تسجيل معرض مسبقاً (قبل ما صاحبه يبدأ)</h2>
-        <p className="text-xs text-slate-500">
-          أول ما يبعت صاحب المعرض أي رسالة من نفس الرقم ده، هيدخل مباشرة كأنه سجّل بنفسه — بدون أي خطوات تسجيل.
-        </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <input name="name" required placeholder="اسم المعرض" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <input name="city" required placeholder="المدينة" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <input name="ownerPhone" required placeholder="رقم صاحب المعرض (966...)" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <input name="ownerName" placeholder="اسم صاحب المعرض (اختياري)" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-        </div>
-        <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          تسجيل المعرض
-        </button>
-      </form>
-
-      {/* تسجيل مسبق لمندوب تحت معرض موجود */}
-      <form action={addPresetSalesRep} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
-        <h2 className="font-semibold text-slate-900">تسجيل مندوب مسبقاً تحت معرض موجود</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <select name="showroomId" required className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-            <option value="">اختر المعرض</option>
-            {rows.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} — {s.city}
-              </option>
-            ))}
-          </select>
-          <input name="salesPhone" required placeholder="رقم المندوب (966...)" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <input name="salesName" placeholder="اسم المندوب (اختياري)" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-        </div>
-        <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-          إضافة المندوب
-        </button>
-      </form>
+      {/* بحث باسم المعرض */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+        <h2 className="font-semibold text-slate-900">🔍 بحث باسم المعرض</h2>
+        <form method="GET" className="flex gap-2">
+          <input
+            name="name"
+            defaultValue={nameQuery ?? ""}
+            placeholder="مثال: معرض السلطان"
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+            بحث
+          </button>
+          {nameQuery && (
+            <a href="/admin/showrooms" className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600">
+              مسح
+            </a>
+          )}
+        </form>
+      </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full text-sm">
@@ -206,6 +196,7 @@ export default async function ShowroomsPage({
                       {(staffByShowroom.get(s.id) ?? []).length === 0 && (
                         <p className="text-slate-400">لا يوجد مناديب مسجلين.</p>
                       )}
+                      <AddRepInline showroomId={s.id} />
                     </div>
                   </details>
                 </td>
@@ -260,7 +251,7 @@ export default async function ShowroomsPage({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
-                  لا توجد معارض مسجلة بعد. جرّب محاكي واتساب لتسجيل أول معرض.
+                  لا توجد معارض مطابقة.
                 </td>
               </tr>
             )}

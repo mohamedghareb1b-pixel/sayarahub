@@ -9,46 +9,40 @@ function normalizePhone(phone: string) {
   return phone.replace(/[^\d+]/g, "").trim();
 }
 
-/** يسجّل معرض + صاحبه مسبقاً قبل ما يتواصل هو نفسه مع البوت خالص. أول ما
- * يبعت أي رسالة من رقمه الحقيقي، النظام هيلاقي حسابه جاهز ويكمل عادي من
- * غير أي خطوات تسجيل (onboarding) — عشان نقدر نجهز بيئة العمل بالكامل
- * (المعرض + مخزونه) قبل ما صاحبه يعرف أصلاً إن عنده حساب. */
+/** يسجّل معرض بس (الاسم والمدينة)، من غير ما يحدد صاحبه دلوقتي — صاحبه
+ * هيربط نفسه بيه لما يبدأ يتواصل مع البوت (أو الأدمن يضيفه بعدين يدوياً
+ * لو حابب من نفس الشاشة). */
 export async function createPresetShowroom(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const city = String(formData.get("city") ?? "").trim();
-  const ownerPhone = normalizePhone(String(formData.get("ownerPhone") ?? ""));
-  const ownerName = String(formData.get("ownerName") ?? "").trim() || null;
-  if (!name || !city || !ownerPhone) return;
+  if (!name || !city) return;
 
-  const [existingUser] = await db.select().from(users).where(eq(users.phone, ownerPhone));
-  if (existingUser?.showroomId) return; // عنده معرض بالفعل، منعملش تكرار
+  await db.insert(showrooms).values({ name, city });
+  revalidatePath("/admin/showrooms");
+}
 
-  const [showroom] = await db.insert(showrooms).values({ name, city }).returning();
+/** يسجّل مندوب "حر" (مش تابع لأي معرض لسه) — بيانات أساسية بس: اسمه،
+ * رقمه، مدينته. تقدر تربطه بمعرض لاحقاً بمجرد ما يتأكد فين هيشتغل. */
+export async function createFreeSalesRep(formData: FormData) {
+  const name = String(formData.get("repName") ?? "").trim() || null;
+  const phone = normalizePhone(String(formData.get("repPhone") ?? ""));
+  const city = String(formData.get("repCity") ?? "").trim() || null;
+  if (!phone) return;
 
-  if (existingUser) {
-    await db
-      .update(users)
-      .set({
-        showroomId: showroom.id,
-        role: "owner",
-        onboardingComplete: true,
-        name: existingUser.name ?? ownerName,
-        conversationState: { step: "idle" },
-      })
-      .where(eq(users.id, existingUser.id));
+  const [existing] = await db.select().from(users).where(eq(users.phone, phone));
+  if (existing) {
+    await db.update(users).set({ name: existing.name ?? name, city: existing.city ?? city }).where(eq(users.id, existing.id));
   } else {
     await db.insert(users).values({
-      phone: ownerPhone,
-      name: ownerName,
-      showroomId: showroom.id,
-      role: "owner",
-      onboardingComplete: true,
-      conversationState: { step: "idle" },
+      phone,
+      name,
+      city,
+      role: "sales",
+      showroomId: null,
+      onboardingComplete: false,
+      conversationState: { step: "ask_role" },
     });
   }
-
-  await db.update(showrooms).set({ ownerUserId: existingUser?.id }).where(eq(showrooms.id, showroom.id));
-
   revalidatePath("/admin/showrooms");
 }
 

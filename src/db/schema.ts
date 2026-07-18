@@ -106,6 +106,7 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   phone: text("phone").notNull().unique(),
   name: text("name"),
+  city: text("city"), // للمندوب "الحر" اللي مش تابع لمعرض معين لسه
   showroomId: uuid("showroom_id").references(() => showrooms.id),
   role: userRoleEnum("role").notNull().default("sales"),
   isActive: boolean("is_active").notNull().default(true),
