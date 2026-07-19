@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { uploadInventorySheet } from "./actions";
+import TargetSearchSelect from "./TargetSearchSelect";
 
 type Rep = { id: string; name: string | null; phone: string; showroomId: string | null };
 
@@ -34,23 +35,7 @@ export default function ExcelUploadForm({
         الماركة، الموديل، الفئة، سنة الصنع، اللون، الوكيل، المدينة، السعر، الكمية، ملاحظات.
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <select name="target" required className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-          <option value="">هتتسجل باسم مين؟</option>
-          <optgroup label="المعارض">
-            {showroomList.map((s) => (
-              <option key={s.id} value={`showroom:${s.id}`}>
-                {s.name} — {s.city}
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label="مناديب">
-            {repList.map((r) => (
-              <option key={r.id} value={`rep:${r.id}:${r.showroomId}`}>
-                {r.name ?? r.phone} — {showroomNameById[r.showroomId ?? ""] ?? ""}
-              </option>
-            ))}
-          </optgroup>
-        </select>
+        <TargetSearchSelect showroomList={showroomList} repList={repList} showroomNameById={showroomNameById} />
         <input
           name="file"
           type="file"

@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { matches, inventory, requests, showrooms } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import CarAvailabilitySearch from "./CarAvailabilitySearch";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,8 @@ export default async function MatchesPage() {
         <h1 className="text-2xl font-bold text-slate-900">المطابقات</h1>
         <p className="mt-1 text-slate-600">دورة حياة كل مطابقة من الاقتراح حتى التوصيل النهائي.</p>
       </div>
+
+      <CarAvailabilitySearch />
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full text-sm">

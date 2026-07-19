@@ -3,6 +3,7 @@ import { inventory, showrooms, users } from "@/db/schema";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { createManualInventoryItem } from "./actions";
 import ExcelUploadForm from "./ExcelUploadForm";
+import TargetSearchSelect from "./TargetSearchSelect";
 
 export const dynamic = "force-dynamic";
 
@@ -56,24 +57,11 @@ export default async function InventoryPage() {
         <h2 className="font-semibold text-slate-900">➕ إضافة سيارة يدوياً</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
-            <label className="mb-1 block text-sm text-slate-600">هتتسجل باسم</label>
-            <select name="target" required className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-              <option value="">اختر المعرض أو المندوب</option>
-              <optgroup label="المعارض">
-                {showroomList.map((s) => (
-                  <option key={s.id} value={`showroom:${s.id}`}>
-                    {s.name} — {s.city}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="مناديب (باسم المندوب، تحت معرضه تلقائي)">
-                {repList.map((r) => (
-                  <option key={r.id} value={`rep:${r.id}:${r.showroomId}`}>
-                    {r.name ?? r.phone} — {showroomNameById.get(r.showroomId ?? "") ?? ""}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
+            <TargetSearchSelect
+              showroomList={showroomList}
+              repList={repList}
+              showroomNameById={Object.fromEntries(showroomNameById)}
+            />
           </div>
           <div>
             <label className="mb-1 block text-sm text-slate-600">الماركة</label>
