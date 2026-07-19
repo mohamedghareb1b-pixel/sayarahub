@@ -163,7 +163,14 @@ export default async function ShowroomsPage({
           <tbody>
             {rows.map((s) => (
               <tr key={s.id} className="border-t border-slate-100">
-                <td className="px-4 py-3 font-medium text-slate-900">{s.name}</td>
+                <td className="px-4 py-3 font-medium text-slate-900">
+                  {s.name}
+                  {s.isPersonalPool && (
+                    <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                      مجمّع مندوب
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-slate-500">{s.city}</td>
                 <td className="px-4 py-3">
                   <details>

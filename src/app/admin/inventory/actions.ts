@@ -7,8 +7,24 @@ import { revalidatePath } from "next/cache";
 import { buildFingerprint } from "@/lib/fingerprint";
 import * as XLSX from "xlsx";
 
+/** خانة اختيار "المعرض/المندوب" في الفورمز بتيجي بصيغة موحدة:
+ * "showroom:<showroomId>" لو اخترت المعرض نفسه، أو "rep:<userId>:<showroomId>"
+ * لو اخترت مندوب معين تابع لمعرض — عشان نعرف نسجل addedBy صح. */
+function parseTargetSelector(raw: string): { showroomId: string; addedBy: string | null } | null {
+  if (raw.startsWith("showroom:")) {
+    const showroomId = raw.slice("showroom:".length);
+    return showroomId ? { showroomId, addedBy: null } : null;
+  }
+  if (raw.startsWith("rep:")) {
+    const [, userId, showroomId] = raw.split(":");
+    return userId && showroomId ? { showroomId, addedBy: userId } : null;
+  }
+  return null;
+}
+
 type ManualCarInput = {
   showroomId: string;
+  addedBy: string | null;
   brand: string;
   model: string;
   trim: string | null;
@@ -56,6 +72,7 @@ async function saveOneInventoryItem(car: ManualCarInput) {
   } else {
     await db.insert(inventory).values({
       showroomId: car.showroomId,
+      addedBy: car.addedBy,
       brand: car.brand,
       model: car.model,
       year: car.year,
@@ -76,7 +93,9 @@ async function saveOneInventoryItem(car: ManualCarInput) {
 }
 
 export async function createManualInventoryItem(formData: FormData) {
-  const showroomId = String(formData.get("showroomId") ?? "").trim();
+  const target = parseTargetSelector(String(formData.get("target") ?? "").trim());
+  if (!target) return;
+
   const brand = String(formData.get("brand") ?? "").trim();
   const model = String(formData.get("model") ?? "").trim();
   const trim = String(formData.get("trim") ?? "").trim() || null;
@@ -90,7 +109,8 @@ export async function createManualInventoryItem(formData: FormData) {
   const quantity = parseInt(String(formData.get("quantity") ?? "1").trim(), 10) || 1;
 
   await saveOneInventoryItem({
-    showroomId,
+    showroomId: target.showroomId,
+    addedBy: target.addedBy,
     brand,
     model,
     trim,
@@ -123,13 +143,13 @@ const TEMPLATE_HEADERS = [
 ];
 
 export async function uploadInventorySheet(formData: FormData): Promise<{ ok: boolean; message: string }> {
-  const showroomId = String(formData.get("showroomId") ?? "").trim();
+  const target = parseTargetSelector(String(formData.get("target") ?? "").trim());
   const file = formData.get("file") as File | null;
 
-  if (!showroomId) return { ok: false, message: "اختر المعرض الأول." };
+  if (!target) return { ok: false, message: "اختر المعرض أو المندوب الأول." };
   if (!file || file.size === 0) return { ok: false, message: "اختر ملف إكسل." };
 
-  const [showroom] = await db.select().from(showrooms).where(eq(showrooms.id, showroomId));
+  const [showroom] = await db.select().from(showrooms).where(eq(showrooms.id, target.showroomId));
   if (!showroom) return { ok: false, message: "المعرض غير موجود." };
 
   const buffer = await file.arrayBuffer();
@@ -182,7 +202,8 @@ export async function uploadInventorySheet(formData: FormData): Promise<{ ok: bo
     }
 
     const success = await saveOneInventoryItem({
-      showroomId,
+      showroomId: target.showroomId,
+      addedBy: target.addedBy,
       brand,
       model,
       trim,

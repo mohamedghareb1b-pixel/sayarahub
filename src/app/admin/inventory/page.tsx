@@ -1,6 +1,6 @@
 import { db } from "@/db";
-import { inventory, showrooms } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { inventory, showrooms, users } from "@/db/schema";
+import { desc, eq, and, sql } from "drizzle-orm";
 import { createManualInventoryItem } from "./actions";
 import ExcelUploadForm from "./ExcelUploadForm";
 
@@ -35,6 +35,15 @@ export default async function InventoryPage() {
     .from(showrooms)
     .orderBy(showrooms.name);
 
+  // مناديب تابعين لمعارض بس (المندوب الحر مش هيظهر هنا لحد ما يترط بمعرض،
+  // لأن أي سيارة لازم تتسجل تحت معرض في النهاية)
+  const repList = await db
+    .select({ id: users.id, name: users.name, phone: users.phone, showroomId: users.showroomId })
+    .from(users)
+    .where(and(eq(users.role, "sales"), sql`${users.showroomId} is not null`))
+    .orderBy(users.name);
+  const showroomNameById = new Map(showroomList.map((s) => [s.id, s.name]));
+
   return (
     <div className="space-y-6">
       <div>
@@ -47,14 +56,23 @@ export default async function InventoryPage() {
         <h2 className="font-semibold text-slate-900">➕ إضافة سيارة يدوياً</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
-            <label className="mb-1 block text-sm text-slate-600">المعرض</label>
-            <select name="showroomId" required className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-              <option value="">اختر المعرض</option>
-              {showroomList.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} — {s.city}
-                </option>
-              ))}
+            <label className="mb-1 block text-sm text-slate-600">هتتسجل باسم</label>
+            <select name="target" required className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+              <option value="">اختر المعرض أو المندوب</option>
+              <optgroup label="المعارض">
+                {showroomList.map((s) => (
+                  <option key={s.id} value={`showroom:${s.id}`}>
+                    {s.name} — {s.city}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="مناديب (باسم المندوب، تحت معرضه تلقائي)">
+                {repList.map((r) => (
+                  <option key={r.id} value={`rep:${r.id}:${r.showroomId}`}>
+                    {r.name ?? r.phone} — {showroomNameById.get(r.showroomId ?? "") ?? ""}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
           <div>
@@ -107,7 +125,7 @@ export default async function InventoryPage() {
         </button>
       </form>
 
-      <ExcelUploadForm showroomList={showroomList} />
+      <ExcelUploadForm showroomList={showroomList} repList={repList} showroomNameById={Object.fromEntries(showroomNameById)} />
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full text-sm">

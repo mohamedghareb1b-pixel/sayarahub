@@ -3,7 +3,17 @@
 import { useState, useTransition } from "react";
 import { uploadInventorySheet } from "./actions";
 
-export default function ExcelUploadForm({ showroomList }: { showroomList: { id: string; name: string; city: string }[] }) {
+type Rep = { id: string; name: string | null; phone: string; showroomId: string | null };
+
+export default function ExcelUploadForm({
+  showroomList,
+  repList,
+  showroomNameById,
+}: {
+  showroomList: { id: string; name: string; city: string }[];
+  repList: Rep[];
+  showroomNameById: Record<string, string>;
+}) {
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -24,13 +34,22 @@ export default function ExcelUploadForm({ showroomList }: { showroomList: { id: 
         الماركة، الموديل، الفئة، سنة الصنع، اللون، الوكيل، المدينة، السعر، الكمية، ملاحظات.
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <select name="showroomId" required className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-          <option value="">اختر المعرض</option>
-          {showroomList.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} — {s.city}
-            </option>
-          ))}
+        <select name="target" required className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+          <option value="">هتتسجل باسم مين؟</option>
+          <optgroup label="المعارض">
+            {showroomList.map((s) => (
+              <option key={s.id} value={`showroom:${s.id}`}>
+                {s.name} — {s.city}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="مناديب">
+            {repList.map((r) => (
+              <option key={r.id} value={`rep:${r.id}:${r.showroomId}`}>
+                {r.name ?? r.phone} — {showroomNameById[r.showroomId ?? ""] ?? ""}
+              </option>
+            ))}
+          </optgroup>
         </select>
         <input
           name="file"

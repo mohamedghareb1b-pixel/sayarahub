@@ -21,28 +21,55 @@ export async function createPresetShowroom(formData: FormData) {
   revalidatePath("/admin/showrooms");
 }
 
-/** يسجّل مندوب "حر" (مش تابع لأي معرض لسه) — بيانات أساسية بس: اسمه،
- * رقمه، مدينته. تقدر تربطه بمعرض لاحقاً بمجرد ما يتأكد فين هيشتغل. */
+/** يسجّل مندوب "حر" — مش تابع لمعرض معين، لكن بيجمع مخزون بنفسه من مصادر
+ * مختلفة. عشان يقدر يسجل مخزون فعلياً (المخزون لازم يتبع "معرض" في هيكل
+ * قاعدة البيانات)، بننشئله تلقائياً "معرض شخصي" يمثل مجموعته الخاصة —
+ * بيظهر في القوايم بعلامة مميزة (مجمّع مندوب) مش كمعرض حقيقي عادي. */
 export async function createFreeSalesRep(formData: FormData) {
   const name = String(formData.get("repName") ?? "").trim() || null;
   const phone = normalizePhone(String(formData.get("repPhone") ?? ""));
-  const city = String(formData.get("repCity") ?? "").trim() || null;
+  const city = String(formData.get("repCity") ?? "").trim();
   if (!phone) return;
 
   const [existing] = await db.select().from(users).where(eq(users.phone, phone));
-  if (existing) {
+  if (existing?.showroomId) {
+    // عنده معرض/مجمّع بالفعل، منعملش تكرار
     await db.update(users).set({ name: existing.name ?? name, city: existing.city ?? city }).where(eq(users.id, existing.id));
-  } else {
-    await db.insert(users).values({
-      phone,
-      name,
-      city,
-      role: "sales",
-      showroomId: null,
-      onboardingComplete: false,
-      conversationState: { step: "ask_role" },
-    });
+    revalidatePath("/admin/showrooms");
+    return;
   }
+
+  const [pool] = await db
+    .insert(showrooms)
+    .values({
+      name: name ? `مجمّع ${name}` : `مجمّع مندوب ${phone}`,
+      city: city || "غير محدد",
+      isPersonalPool: true,
+    })
+    .returning();
+
+  if (existing) {
+    await db
+      .update(users)
+      .set({ name: existing.name ?? name, city: existing.city ?? city, showroomId: pool.id, role: "sales" })
+      .where(eq(users.id, existing.id));
+    await db.update(showrooms).set({ ownerUserId: existing.id }).where(eq(showrooms.id, pool.id));
+  } else {
+    const [created] = await db
+      .insert(users)
+      .values({
+        phone,
+        name,
+        city,
+        role: "sales",
+        showroomId: pool.id,
+        onboardingComplete: true,
+        conversationState: { step: "idle" },
+      })
+      .returning();
+    await db.update(showrooms).set({ ownerUserId: created.id }).where(eq(showrooms.id, pool.id));
+  }
+
   revalidatePath("/admin/showrooms");
 }
 

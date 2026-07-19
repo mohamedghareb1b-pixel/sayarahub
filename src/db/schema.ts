@@ -98,6 +98,7 @@ export const showrooms = pgTable("showrooms", {
     .default(sql`now() + interval '30 days'`),
   monthlyConfirmedMatches: integer("monthly_confirmed_matches").notNull().default(0),
   maxConfirmedMatches: integer("max_confirmed_matches").notNull().default(999999),
+  isPersonalPool: boolean("is_personal_pool").notNull().default(false), // مخزون مندوب حر بيجمعه بنفسه، مش معرض حقيقي
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
