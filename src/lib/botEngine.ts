@@ -27,6 +27,7 @@ type ConversationState = {
     | "confirm_parsed"
     | "ask_missing_field"
     | "editing_field"
+    | "editing_profile_field"
     | "idle";
   pendingRepName?: string;
   pendingShowroomName?: string;
@@ -35,6 +36,7 @@ type ConversationState = {
   missingFieldQueue?: string[];
   addSalesPhone?: string;
   editingField?: string;
+  editingProfileField?: "name" | "showroom" | "city";
   pendingJoinShowroomId?: string;
 };
 
@@ -108,7 +110,18 @@ function idleMenuButtons(): Button[] {
   return [
     { id: "guided_supply", title: "🚗 عندي سيارة (متوفر)" },
     { id: "guided_demand", title: "🔍 عايز سيارة (مطلوب)" },
-    { id: "excel_via_admin", title: "📊 عندي ملف إكسل" },
+    { id: "edit_profile", title: "✏️ تعديل بياناتي" },
+  ];
+}
+
+/** المجموعة الكاملة (4 أزرار) اللي بتظهر بعد التسجيل مباشرة، وبعد أي إدخال
+ * طلب/سيارة يخلص — عشان كل الخيارات الأساسية تكون قدام المستخدم مرة واحدة. */
+function fullActionButtons(): Button[] {
+  return [
+    { id: "excel_via_admin", title: "📤 أرسل مخزونك" },
+    { id: "work_details", title: "📋 تفاصيل العمل" },
+    { id: "edit_profile", title: "✏️ تعديل بياناتي" },
+    { id: "guided_demand", title: "🔍 عايز سيارة" },
   ];
 }
 
@@ -244,12 +257,8 @@ async function completeRepRegistration(
 
   await reply(
     user.phone,
-    `🎉 تمام يا ${repName ?? ""}! سجلناك بنجاح.\n📍 ${workLabel ?? ""} — ${city}\n\nتقدر تعدّل بياناتك في أي وقت من زر "تعديل بياناتي" تحت.`,
-    [
-      { id: "excel_via_admin", title: "📤 أرسل مخزونك" },
-      { id: "work_details", title: "📋 تفاصيل العمل" },
-      { id: "edit_profile", title: "✏️ تعديل بياناتي" },
-    ],
+    `🎉 تمام يا ${repName ?? ""}! سجلناك بنجاح.\n📍 ${workLabel ?? ""} — ${city}`,
+    fullActionButtons(),
     user.id,
   );
 }
@@ -352,7 +361,7 @@ async function finalizeParsed(user: typeof users.$inferSelect, parsed: ParsedCar
     await reply(
       user.phone,
       `✅ تم إضافة السيارة لمخزونك: ${summarize(parsed)}\nستبقى متاحة 30 يوم أو حتى يتم توصيلها.`,
-      idleMenuButtons(),
+      fullActionButtons(),
       user.id,
     );
     await runMatchingForInventory(invId);
@@ -361,7 +370,7 @@ async function finalizeParsed(user: typeof users.$inferSelect, parsed: ParsedCar
     await reply(
       user.phone,
       `🔎 تم تسجيل طلبك: ${summarize(parsed)}\nسنبحث لك في مخزون بقية المعارض وسنعلمك فور توفر تطابق. الطلب صالح 12 ساعة.`,
-      idleMenuButtons(),
+      fullActionButtons(),
       user.id,
     );
     await runMatchingForRequest(reqId);
@@ -369,7 +378,7 @@ async function finalizeParsed(user: typeof users.$inferSelect, parsed: ParsedCar
     await reply(
       user.phone,
       "لم أفهم إن كان هذا طلب أم عرض، أرسل مثلاً: مطلوب أو متوفر ثم تفاصيل السيارة.",
-      idleMenuButtons(),
+      fullActionButtons(),
       user.id,
     );
   }
@@ -450,7 +459,7 @@ async function getOrCreateUser(phone: string, name?: string | null) {
   }
   const [created] = await db
     .insert(users)
-    .values({ phone, name, conversationState: { step: "ask_rep_name" } })
+    .values({ phone, name, conversationState: {} })
     .returning();
   return created;
 }
@@ -477,8 +486,8 @@ export async function handleIncomingMessage(input: {
     if (btn === "excel_via_admin") {
       await reply(
         user.phone,
-        `📊 تمام! ابعت ملف الإكسل بتاعك مباشرة على الرقم ده وهنرفعه لمخزونك بأنفسنا:\n\nwa.me/${ADMIN_EXCEL_PHONE}\n\n(لازم يكون الملف بنفس قالبنا الرسمي عشان نقدر نرفعه صح)`,
-        idleMenuButtons(),
+        `تمام! ابعت مخزونك على الرقم ده وهنرفعه لمخزونك بلا أي تعب يا غالي 🙏\n\nwa.me/${ADMIN_EXCEL_PHONE}`,
+        undefined,
         user.id,
       );
       return;
@@ -495,8 +504,29 @@ export async function handleIncomingMessage(input: {
     }
 
     if (btn === "edit_profile") {
-      await setState(user.id, { step: "ask_rep_name" });
-      await reply(user.phone, "تمام، نبدأ نحدّث بياناتك. إيه اسمك؟", undefined, user.id);
+      await reply(
+        user.phone,
+        "تمام، إيه اللي عايز تعدّله؟",
+        [
+          { id: "editprofile:name", title: "👤 اسمي" },
+          { id: "editprofile:showroom", title: "🏢 اسم المعرض" },
+          { id: "editprofile:city", title: "📍 المدينة" },
+        ],
+        user.id,
+      );
+      return;
+    }
+
+    if (btn.startsWith("editprofile:")) {
+      const field = btn.replace("editprofile:", "") as "name" | "showroom" | "city";
+      await setState(user.id, { step: "editing_profile_field", editingProfileField: field });
+      if (field === "name") {
+        await reply(user.phone, "تمام، اكتب اسمك الجديد:", undefined, user.id);
+      } else if (field === "showroom") {
+        await reply(user.phone, "تمام، اكتب اسم المعرض/الجهة الجديد:", undefined, user.id);
+      } else {
+        await reply(user.phone, "اختر المدينة الجديدة:", cityButtons(), user.id);
+      }
       return;
     }
 
@@ -530,6 +560,17 @@ export async function handleIncomingMessage(input: {
 
     if (btn === "guided_supply" || btn === "guided_supply_start" || btn === "guided_demand") {
       const type: "supply" | "demand" = btn === "guided_demand" ? "demand" : "supply";
+      // المدينة بتتاخد تلقائي من بروفايل المستخدم — لكل مندوب "معرض شخصي"
+      // اتسجلت مدينته وقت التسجيل في showrooms.city (مش في users.city، اللي
+      // بيفضل دايماً فاضي في المنطق الجديد لأننا بقينا بننشئ معرض شخصي لكل
+      // مندوب بدل ما نخزّن المدينة على حسابه مباشرة). القراءة القديمة من
+      // user.city كانت بترجع null دايماً تقريباً، فالمدينة كانت بترجع تتسأل
+      // تاني كل مرة رغم إنها مفروض تتشال من الأسئلة.
+      let profileCity: string | null = user.city ?? null;
+      if (!profileCity && user.showroomId) {
+        const [ownShowroom] = await db.select().from(showrooms).where(eq(showrooms.id, user.showroomId));
+        profileCity = ownShowroom?.city ?? null;
+      }
       const empty: ParsedCar = {
         type,
         brand: null,
@@ -544,9 +585,7 @@ export async function handleIncomingMessage(input: {
         fuelType: null,
         transmission: null,
         spec: "سعودي",
-        // المدينة بتتاخد تلقائي من بروفايل المستخدم نفسه (مسجلها وقت
-        // التسجيل)، فمش بنسأل عنها تاني كل مرة.
-        city: user.city ?? null,
+        city: profileCity,
         quantity: 1,
         price: null,
         confidence: 1,
@@ -554,7 +593,7 @@ export async function handleIncomingMessage(input: {
       };
       // الترتيب: ماركة، موديل، فئة، سنة الصنع (ينفع أكتر من سنة بـ /)، لون،
       // الوكيل، ملاحظات. المدينة اتشالت من الأسئلة لأنها تلقائية من البروفايل.
-      const queue = user.city
+      const queue = profileCity
         ? ["brand", "model", "trim", "year", "color", "spec", "extraFeatures"]
         : ["brand", "model", "trim", "year", "color", "spec", "city", "extraFeatures"];
       await setState(user.id, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
@@ -587,7 +626,19 @@ export async function handleIncomingMessage(input: {
         return;
       }
 
-      // حالة 2: اختيار المدينة أثناء تعديل حقل "المكان" في طلب/عرض قائم
+      // حالة 2: اختيار المدينة الجديدة أثناء تعديل بروفايل المستخدم نفسه
+      // (مش طلب/عرض) — بتتحدث في showrooms.city مباشرة لأن دي المصدر
+      // الحقيقي لمدينة المندوب اللي بيتاخد منها تلقائي في أي طلب/عرض جديد.
+      if (st.step === "editing_profile_field" && st.editingProfileField === "city") {
+        if (user.showroomId) {
+          await db.update(showrooms).set({ city: cityName }).where(eq(showrooms.id, user.showroomId));
+        }
+        await setState(user.id, { step: "idle" });
+        await reply(user.phone, `✅ تم تحديث مدينتك إلى ${cityName}.`, fullActionButtons(), user.id);
+        return;
+      }
+
+      // حالة 3: اختيار المدينة أثناء تعديل حقل "المكان" في طلب/عرض قائم
       if (st.step === "editing_field" && st.editingField === "city" && st.pendingParsed) {
         const updated: ParsedCar = { ...st.pendingParsed, city: cityName };
         updated.missingFields = updated.missingFields.filter((f) => f !== "city");
@@ -686,7 +737,7 @@ export async function handleIncomingMessage(input: {
         return;
       }
       await setState(user.id, { step: "ask_rep_name" });
-      await reply(user.phone, "أهلاً بك في SayaraHub 🚗\nإيه اسمك؟", undefined, user.id);
+      await reply(user.phone, "مرحباً بك في سيارة هب 🚗\nاكتب اسمك:", undefined, user.id);
       return;
     }
 
@@ -700,6 +751,25 @@ export async function handleIncomingMessage(input: {
       await completeRepRegistration(user, st.pendingRepName, st.pendingShowroomName, text);
       return;
     }
+  }
+
+  // ── تعديل حقل واحد من بروفايل مستخدم مسجل بالفعل ────────────────────
+  // لازم يعيش هنا برّه بوابة "!user.onboardingComplete" فوق، لأن المستخدم
+  // اللي بيدوس "تعديل بياناتي" onboardingComplete بتاعه true بالفعل، وأي
+  // كود جوا البوابة دي كان هيتجاهل رده وتتفهم رسالته غلط كأنها وصف سيارة.
+  if (st.step === "editing_profile_field" && st.editingProfileField === "name" && text) {
+    await db.update(users).set({ name: text }).where(eq(users.id, user.id));
+    await setState(user.id, { step: "idle" });
+    await reply(user.phone, `✅ تم تحديث اسمك إلى ${text}.`, fullActionButtons(), user.id);
+    return;
+  }
+  if (st.step === "editing_profile_field" && st.editingProfileField === "showroom" && text) {
+    if (user.showroomId) {
+      await db.update(showrooms).set({ name: text }).where(eq(showrooms.id, user.showroomId));
+    }
+    await setState(user.id, { step: "idle" });
+    await reply(user.phone, `✅ تم تحديث اسم المعرض إلى ${text}.`, fullActionButtons(), user.id);
+    return;
   }
 
   // ── Onboarded user flows ─────────────────────────────────────────────
