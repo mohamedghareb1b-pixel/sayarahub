@@ -3,7 +3,6 @@ import { sql, eq, and } from "drizzle-orm";
 import {
   users,
   showrooms,
-  joinRequests,
   salesInvites,
   dailyCheckins,
   requests as requestsTable,
@@ -21,16 +20,15 @@ import { findDynamicBrandAlias, findDynamicTerm, getVocabCache } from "./vocabul
 
 type ConversationState = {
   step:
-    | "ask_role"
-    | "ask_showroom_name"
-    | "ask_showroom_city"
-    | "ask_showroom_search"
-    | "awaiting_join_approval"
+    | "ask_rep_name"
+    | "ask_rep_label"
+    | "ask_rep_city"
     | "awaiting_add_sales_phone"
     | "confirm_parsed"
     | "ask_missing_field"
     | "editing_field"
     | "idle";
+  pendingRepName?: string;
   pendingShowroomName?: string;
   pendingParsed?: ParsedCar;
   originalText?: string;
@@ -43,7 +41,7 @@ type ConversationState = {
 const FIELD_QUESTIONS: Record<string, string> = {
   brand: "ما هي ماركة السيارة؟ (مثال: تويوتا)",
   model: "ما هو موديل السيارة؟ (مثال: كامري)",
-  year: "ما هي سنة الصنع؟ (مثال: 2025)",
+  year: "ما هي سنة الصنع؟ (مثال: 2025) — لو طلب ومرن في أكتر من سنة، اكتبهم مفصولين بـ / مثال: 2024/2025",
   city: "في أي مدينة؟ (مثال: الرياض)",
   trim: "ما هي الفئة/الدرجة؟ ينفع تكتب أكتر من فئة مفصولين بـ / أو - (مثال: ستاندر/فل كامل)",
   color: "ما هي الألوان المتوفرة؟ ينفع تكتب أكتر من لون مفصولين بـ / أو - (مثال: أبيض/أحمر)",
@@ -219,19 +217,39 @@ function summarize(parsed: ParsedCar) {
   return extras.length > 0 ? `${main}\n📝 ملاحظات: ${extras.join("، ")}` : main;
 }
 
-async function registerShowroom(user: typeof users.$inferSelect, pendingName: string | undefined, city: string) {
-  const [showroom] = await db
+async function completeRepRegistration(
+  user: typeof users.$inferSelect,
+  repName: string | undefined,
+  workLabel: string | undefined,
+  city: string,
+) {
+  // كل مندوب مستقل تماماً بمخزونه الخاص — بننشئله "معرض شخصي" يمثل شغله
+  // (مجرد اسم/تسمية، مش معرض بمعنى تنظيمي مرتبط بحد تاني).
+  const [pool] = await db
     .insert(showrooms)
-    .values({ name: pendingName ?? "معرض بدون اسم", city, ownerUserId: user.id })
+    .values({ name: workLabel ?? `مندوب ${user.phone}`, city, isPersonalPool: true })
     .returning();
+
   await db
     .update(users)
-    .set({ showroomId: showroom.id, role: "owner", onboardingComplete: true, conversationState: { step: "idle" } })
+    .set({
+      name: repName ?? user.name,
+      showroomId: pool.id,
+      role: "sales",
+      onboardingComplete: true,
+      conversationState: { step: "idle" },
+    })
     .where(eq(users.id, user.id));
+  await db.update(showrooms).set({ ownerUserId: user.id }).where(eq(showrooms.id, pool.id));
+
   await reply(
     user.phone,
-    `🎉 تم تسجيل معرض "${showroom.name}" في ${showroom.city}!\nأنت الآن مالك المعرض. اضغط زر "متوفر" أو "مطلوب" تحت عشان تبدأ تضيف أول سيارة:`,
-    idleMenuButtons(),
+    `🎉 تمام يا ${repName ?? ""}! سجلناك بنجاح.\n📍 ${workLabel ?? ""} — ${city}\n\nتقدر تعدّل بياناتك في أي وقت من زر "تعديل بياناتي" تحت.`,
+    [
+      { id: "excel_via_admin", title: "📤 أرسل مخزونك" },
+      { id: "work_details", title: "📋 تفاصيل العمل" },
+      { id: "edit_profile", title: "✏️ تعديل بياناتي" },
+    ],
     user.id,
   );
 }
@@ -432,7 +450,7 @@ async function getOrCreateUser(phone: string, name?: string | null) {
   }
   const [created] = await db
     .insert(users)
-    .values({ phone, name, conversationState: { step: "ask_role" } })
+    .values({ phone, name, conversationState: { step: "ask_rep_name" } })
     .returning();
   return created;
 }
@@ -454,17 +472,6 @@ export async function handleIncomingMessage(input: {
   if (input.buttonId) {
     const btn = input.buttonId;
 
-    if (btn === "role_owner" || btn === "role_sales") {
-      if (btn === "role_owner") {
-        await setState(user.id, { step: "ask_showroom_name" });
-        await reply(user.phone, "تمام 👍 ما اسم معرضك؟", undefined, user.id);
-      } else {
-        await setState(user.id, { step: "ask_showroom_search" });
-        await reply(user.phone, "ما اسم المعرض الذي تعمل به؟", undefined, user.id);
-      }
-      return;
-    }
-
     if (btn === "checkin") return doCheckin(user);
 
     if (btn === "excel_via_admin") {
@@ -477,8 +484,52 @@ export async function handleIncomingMessage(input: {
       return;
     }
 
-    if (btn === "guided_supply" || btn === "guided_demand") {
-      const type: "supply" | "demand" = btn === "guided_supply" ? "supply" : "demand";
+    if (btn === "work_details") {
+      await reply(
+        user.phone,
+        `📋 إزاي بنشتغل:\n\n1️⃣ تبعتلنا مخزونك (السيارات المتوفرة عندك) وإحنا برفعها لحسابك.\n2️⃣ أي حد يدور على ماركة/موديل/سنة موجودة في مخزونك، هتوصلك رسالة فيها الطلب كامل تلقائي.\n3️⃣ لو السيارة عندك، دوس "✅ متوفر" وهنوصّلك مباشرة بصاحب الطلب. لو مش عندك، دوس "❌ غير متوفر".\n4️⃣ لازم تسجل حضورك يومياً بكتابة "صباح الخير" عشان نعرف إنك شغال.\n\nأي سؤال، ابعته على wa.me/${ADMIN_EXCEL_PHONE}`,
+        idleMenuButtons(),
+        user.id,
+      );
+      return;
+    }
+
+    if (btn === "edit_profile") {
+      await setState(user.id, { step: "ask_rep_name" });
+      await reply(user.phone, "تمام، نبدأ نحدّث بياناتك. إيه اسمك؟", undefined, user.id);
+      return;
+    }
+
+    if (btn === "guided_supply") {
+      // نوري مخزونه الحالي الأول قبل ما نبدأ نسأله عن سيارة جديدة
+      const existing = user.showroomId
+        ? await db
+            .select()
+            .from(inventoryTable)
+            .where(and(eq(inventoryTable.showroomId, user.showroomId), eq(inventoryTable.status, "available")))
+            .limit(20)
+        : [];
+
+      if (existing.length > 0) {
+        const list = existing
+          .map((c, i) => `${i + 1}. ${[c.brand, c.model, c.trim, c.year, c.color].filter(Boolean).join(" ")}`)
+          .join("\n");
+        await reply(
+          user.phone,
+          `📦 مخزونك الحالي (${existing.length}):\n${list}\n\nعايز تعمل إيه؟`,
+          [
+            { id: "guided_supply_start", title: "➕ إضافة سيارة جديدة" },
+            { id: "excel_via_admin", title: "📤 راسل الإدارة" },
+          ],
+          user.id,
+        );
+        return;
+      }
+      // مفيش مخزون قديم — كمّل على طول لفلو الإضافة
+    }
+
+    if (btn === "guided_supply" || btn === "guided_supply_start" || btn === "guided_demand") {
+      const type: "supply" | "demand" = btn === "guided_demand" ? "demand" : "supply";
       const empty: ParsedCar = {
         type,
         brand: null,
@@ -493,63 +544,21 @@ export async function handleIncomingMessage(input: {
         fuelType: null,
         transmission: null,
         spec: "سعودي",
-        city: null,
+        // المدينة بتتاخد تلقائي من بروفايل المستخدم نفسه (مسجلها وقت
+        // التسجيل)، فمش بنسأل عنها تاني كل مرة.
+        city: user.city ?? null,
         quantity: 1,
         price: null,
         confidence: 1,
         missingFields: [],
       };
-      // الترتيب المطلوب بالظبط: ماركة، موديل، فئة، سنة الصنع، لون، الوكيل،
-      // المدينة، ملاحظات — بنسألهم كلهم بنفس الترتيب ده في كل مرة.
-      const queue = ["brand", "model", "trim", "year", "color", "spec", "city", "extraFeatures"];
+      // الترتيب: ماركة، موديل، فئة، سنة الصنع (ينفع أكتر من سنة بـ /)، لون،
+      // الوكيل، ملاحظات. المدينة اتشالت من الأسئلة لأنها تلقائية من البروفايل.
+      const queue = user.city
+        ? ["brand", "model", "trim", "year", "color", "spec", "extraFeatures"]
+        : ["brand", "model", "trim", "year", "color", "spec", "city", "extraFeatures"];
       await setState(user.id, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
       await askNextMissingField(user, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
-      return;
-    }
-
-    if (btn === "retry_showroom_search") {
-      await setState(user.id, { step: "ask_showroom_search" });
-      await reply(user.phone, "اكتب اسم المعرض:", undefined, user.id);
-      return;
-    }
-
-    if (btn === "register_as_owner") {
-      await setState(user.id, { step: "ask_showroom_city", pendingShowroomName: st.pendingShowroomName });
-      await reply(user.phone, "تمام! وفي أي مدينة يقع المعرض؟", cityButtons(), user.id);
-      return;
-    }
-
-    if (btn === "joinconfirm_no") {
-      await setState(user.id, { step: "ask_showroom_search" });
-      await reply(user.phone, "تمام، اكتب اسم المعرض الصحيح:", undefined, user.id);
-      return;
-    }
-
-    if (btn === "joinconfirm_yes" && st.pendingJoinShowroomId) {
-      const showroomId = st.pendingJoinShowroomId;
-      const [found] = await db.select().from(showrooms).where(eq(showrooms.id, showroomId));
-      if (!found) {
-        await setState(user.id, { step: "ask_showroom_search" });
-        await reply(user.phone, "حصل خطأ، اكتب اسم المعرض تاني:", undefined, user.id);
-        return;
-      }
-      const [jr] = await db.insert(joinRequests).values({ userId: user.id, showroomId }).returning();
-      await setState(user.id, { step: "awaiting_join_approval" });
-      await reply(user.phone, `تم إرسال طلب انضمامك لمعرض "${found.name}"، بانتظار موافقة صاحب المعرض.`, undefined, user.id);
-      if (found.ownerUserId) {
-        const [owner] = await db.select().from(users).where(eq(users.id, found.ownerUserId));
-        if (owner) {
-          await reply(
-            owner.phone,
-            `👋 ${user.name ?? phone} يطلب الانضمام كمندوب في معرضك "${found.name}"`,
-            [
-              { id: `join_approve_${jr.id}`, title: "✅ موافق" },
-              { id: `join_reject_${jr.id}`, title: "❌ رفض" },
-            ],
-            owner.id,
-          );
-        }
-      }
       return;
     }
 
@@ -572,9 +581,9 @@ export async function handleIncomingMessage(input: {
     if (btn.startsWith("city:")) {
       const cityName = btn.replace("city:", "");
 
-      // حالة 1: اختيار المدينة أثناء تسجيل معرض جديد لأول مرة
-      if (st.step === "ask_showroom_city") {
-        await registerShowroom(user, st.pendingShowroomName, cityName);
+      // حالة 1: اختيار المدينة أثناء التسجيل لأول مرة
+      if (st.step === "ask_rep_city") {
+        await completeRepRegistration(user, st.pendingRepName, st.pendingShowroomName, cityName);
         return;
       }
 
@@ -594,33 +603,6 @@ export async function handleIncomingMessage(input: {
         );
         return;
       }
-      return;
-    }
-
-    if (btn.startsWith("join_approve_") || btn.startsWith("join_reject_")) {
-      const id = btn.replace("join_approve_", "").replace("join_reject_", "");
-      const [jr] = await db.select().from(joinRequests).where(eq(joinRequests.id, id));
-      if (!jr) return;
-      const approved = btn.startsWith("join_approve_");
-      await db
-        .update(joinRequests)
-        .set({ status: approved ? "approved" : "rejected", respondedAt: new Date() })
-        .where(eq(joinRequests.id, id));
-      if (jr.userId) {
-        const [salesUser] = await db.select().from(users).where(eq(users.id, jr.userId));
-        if (salesUser) {
-          if (approved && jr.showroomId) {
-            await db
-              .update(users)
-              .set({ showroomId: jr.showroomId, role: "sales", onboardingComplete: true, conversationState: { step: "idle" } })
-              .where(eq(users.id, salesUser.id));
-            await reply(salesUser.phone, "🎉 تم قبولك كمندوب في المعرض! يمكنك الآن إرسال طلبات أو سيارات متوفرة بحرية.", undefined, salesUser.id);
-          } else {
-            await reply(salesUser.phone, "❌ للأسف تم رفض طلب انضمامك من صاحب المعرض.", undefined, salesUser.id);
-          }
-        }
-      }
-      await reply(user.phone, approved ? "تم القبول ✅" : "تم الرفض ❌", undefined, user.id);
       return;
     }
 
@@ -663,14 +645,18 @@ export async function handleIncomingMessage(input: {
 
     if (btn.startsWith("match_yes_")) {
       const matchId = btn.replace("match_yes_", "");
-      await confirmMatch(matchId);
-      await reply(user.phone, "✅ تم تأكيد التوفر، سيتم توصيلك بالمعرض الطالب الآن.", undefined, user.id);
+      const result = await confirmMatch(matchId);
+      if (result.ok) {
+        await reply(user.phone, "✅ تم تأكيد التوفر، سيتم توصيلك بالطالب الآن.", undefined, user.id);
+      } else {
+        await reply(user.phone, "⏱️ للأسف حد تاني رد قبلك على نفس الطلب.", undefined, user.id);
+      }
       return;
     }
     if (btn.startsWith("match_no_")) {
       const matchId = btn.replace("match_no_", "");
-      await declineMatch(matchId, "declined");
-      await reply(user.phone, "تم تحديث الحالة، شكراً لك.", undefined, user.id);
+      await declineMatch(matchId);
+      await reply(user.phone, "تمام، شكراً لردك.", undefined, user.id);
       return;
     }
 
@@ -693,73 +679,25 @@ export async function handleIncomingMessage(input: {
 
   // ── Onboarding ───────────────────────────────────────────────────────
   if (!user.onboardingComplete) {
-    if (st.step === "ask_role" || !st.step) {
-      if (text.includes("صاحب")) {
-        await setState(user.id, { step: "ask_showroom_name" });
-        await reply(user.phone, "تمام 👍 ما اسم معرضك؟", undefined, user.id);
+    if (st.step === "ask_rep_name" || !st.step) {
+      if (st.step === "ask_rep_name" && text) {
+        await setState(user.id, { step: "ask_rep_label", pendingRepName: text });
+        await reply(user.phone, `تشرفنا يا ${text} 🙌\nإيه اسم المعرض/الجهة اللي بتشتغل بيها؟`, undefined, user.id);
         return;
       }
-      if (text.includes("مندوب")) {
-        await setState(user.id, { step: "ask_showroom_search" });
-        await reply(user.phone, "ما اسم المعرض الذي تعمل به؟", undefined, user.id);
-        return;
-      }
-      await reply(
-        user.phone,
-        "أهلاً بك في SayaraHub 🚗\nهل أنت صاحب معرض أم مندوب مبيعات؟",
-        [
-          { id: "role_owner", title: "صاحب معرض" },
-          { id: "role_sales", title: "مندوب" },
-        ],
-        user.id,
-      );
+      await setState(user.id, { step: "ask_rep_name" });
+      await reply(user.phone, "أهلاً بك في SayaraHub 🚗\nإيه اسمك؟", undefined, user.id);
       return;
     }
 
-    if (st.step === "ask_showroom_name") {
-      await setState(user.id, { step: "ask_showroom_city", pendingShowroomName: text });
-      await reply(user.phone, "وفي أي مدينة يقع المعرض؟", cityButtons(), user.id);
+    if (st.step === "ask_rep_label") {
+      await setState(user.id, { step: "ask_rep_city", pendingRepName: st.pendingRepName, pendingShowroomName: text });
+      await reply(user.phone, "تمام. في أي مدينة بتشتغل؟", cityButtons(), user.id);
       return;
     }
 
-    if (st.step === "ask_showroom_city") {
-      await registerShowroom(user, st.pendingShowroomName, text);
-      return;
-    }
-
-    if (st.step === "ask_showroom_search") {
-      const found = await findShowroomBySimilarName(text);
-      if (found) {
-        // منبعتش طلب الانضمام مباشرة — لازم تأكيد صريح من المستخدم الأول،
-        // عشان تشابه الأسماء (زي "معرض الغريب" و"معرض السلطان") كان بيسبب
-        // ربط المندوب بمعرض غلط تماماً من غير ما حد يلاحظ.
-        await setState(user.id, { step: "ask_showroom_search", pendingJoinShowroomId: found.id });
-        await reply(
-          user.phone,
-          `هل تقصد معرض "${found.name}" في ${found.city}؟`,
-          [
-            { id: `joinconfirm_yes`, title: "✅ نعم" },
-            { id: `joinconfirm_no`, title: "❌ لا، اسم تاني" },
-          ],
-          user.id,
-        );
-      } else {
-        await setState(user.id, { step: "ask_showroom_search", pendingShowroomName: text });
-        await reply(
-          user.phone,
-          `لم أجد معرض بهذا الاسم "${text}".\nممكن يكون المعرض ده لسه مسجل عندنا، وإنت أول واحد بيدخل منه — تقدر تسجله بنفسك كصاحب معرض.`,
-          [
-            { id: "register_as_owner", title: "🏢 سجّل المعرض ده" },
-            { id: "retry_showroom_search", title: "✏️ اكتب اسم تاني" },
-          ],
-          user.id,
-        );
-      }
-      return;
-    }
-
-    if (st.step === "awaiting_join_approval") {
-      await reply(user.phone, "طلبك قيد المراجعة من صاحب المعرض، سيتم إشعارك فور الموافقة.", undefined, user.id);
+    if (st.step === "ask_rep_city") {
+      await completeRepRegistration(user, st.pendingRepName, st.pendingShowroomName, text);
       return;
     }
   }
@@ -830,11 +768,43 @@ export async function handleIncomingMessage(input: {
     const parsed = { ...st.pendingParsed } as ParsedCar & Record<string, unknown>;
     const isGuidedMode = st.pendingParsed.confidence === 1;
     const rawAnswer = text.trim();
-    const skipped = isGuidedMode && (rawAnswer === "-" || rawAnswer === "" || rawAnswer === "تخطي" || rawAnswer === "لا");
+    const wantsSkip = rawAnswer === "-" || rawAnswer === "" || rawAnswer === "تخطي" || rawAnswer === "لا";
+    // اللون إجباري لو السيارة "متوفر" (عرض) — ميتخطاش بـ "-" زي باقي الحقول
+    // الاختيارية (الوكيل والملاحظات)، عشان معرض ميقدرش يعرض سيارة من غير
+    // ما يحدد لونها فعلياً.
+    const isSkippableField = field === "spec" || field === "extraFeatures" || (field === "color" && parsed.type === "demand");
+    const skipped = isGuidedMode && wantsSkip && isSkippableField;
+
+    if (field && isGuidedMode && wantsSkip && !isSkippableField) {
+      // حاول يتخطى حقل إجباري (زي اللون في حالة عرض) — نرفض ونوضحله السبب
+      await reply(
+        user.phone,
+        "❌ الحقل ده إجباري ومينفعش تتخطاه. " + (FIELD_QUESTIONS[field] ?? ""),
+        undefined,
+        user.id,
+      );
+      await setState(user.id, { step: "ask_missing_field", pendingParsed: parsed, originalText: st.originalText, missingFieldQueue: [field, ...queue] });
+      return;
+    }
 
     if (field && skipped) {
       // سؤال اختياري اتخطى (زي الوكيل أو الملاحظات) — نسيب القيمة الحالية
       // زي ما هي (مثلاً الوكيل يفضل "سعودي" الافتراضي) وننتقل للسؤال اللي بعده.
+    } else if (field === "year" && isGuidedMode && parsed.type === "demand" && /[\/\-]/.test(rawAnswer)) {
+      // طلب عميل بس ممكن يقبل أكتر من سنة (زي "2024/2025") — نسجل أول سنة
+      // كسنة أساسية للمطابقة، والباقي بيتحط في الملاحظات عشان المندوب يشوفه
+      // ويقرر بنفسه، لأن عمود السنة في قاعدة البيانات رقم واحد بس.
+      const years = rawAnswer
+        .split(/[\/\-]/)
+        .map((p) => parseInt(p.trim(), 10))
+        .filter((n) => !isNaN(n));
+      if (years.length > 0) {
+        parsed.year = years[0] < 100 ? 2000 + years[0] : years[0];
+        if (years.length > 1) {
+          const extraYearsNote = `سنوات مقبولة كمان: ${years.slice(1).join("، ")}`;
+          parsed.extraFeatures = [parsed.extraFeatures, extraYearsNote].filter(Boolean).join("، ");
+        }
+      }
     } else if (field && isGuidedMode && ["color", "trim", "extraFeatures"].includes(field)) {
       // الحقول اللي ممكن يكون فيها أكتر من قيمة مفصولة بـ / أو - (زي لونين
       // أو ملاحظتين): نقسمهم، نتحقق من كل واحدة لوحدها، ونسجل أي حاجة

@@ -2,7 +2,7 @@
 
 import { db } from "@/db";
 import { inventory, showrooms, users } from "@/db/schema";
-import { and, eq, ilike, inArray } from "drizzle-orm";
+import { and, eq, ilike, sql } from "drizzle-orm";
 
 export type CarAvailabilityResult = {
   showroomId: string;
@@ -15,43 +15,23 @@ export type CarAvailabilityResult = {
   color: string | null;
   price: string | null;
   quantity: number;
-  contacts: {
-    name: string | null;
-    phone: string;
-    role: string;
-  }[];
+  contacts: { name: string | null; phone: string; role: string }[];
 };
 
-export async function searchCarAvailability(
-  formData: FormData
-): Promise<CarAvailabilityResult[]> {
+export async function searchCarAvailability(formData: FormData): Promise<CarAvailabilityResult[]> {
   const brand = String(formData.get("brand") ?? "").trim();
   const model = String(formData.get("model") ?? "").trim();
   const trim = String(formData.get("trim") ?? "").trim();
   const yearStr = String(formData.get("year") ?? "").trim();
   const year = yearStr ? parseInt(yearStr, 10) : null;
 
-  if (!brand && !model) {
-    return [];
-  }
+  if (!brand && !model) return [];
 
   const conditions = [eq(inventory.status, "available")];
-
-  if (brand) {
-    conditions.push(ilike(inventory.brand, `%${brand}%`));
-  }
-
-  if (model) {
-    conditions.push(ilike(inventory.model, `%${model}%`));
-  }
-
-  if (trim) {
-    conditions.push(ilike(inventory.trim, `%${trim}%`));
-  }
-
-  if (year) {
-    conditions.push(eq(inventory.year, year));
-  }
+  if (brand) conditions.push(ilike(inventory.brand, `%${brand}%`));
+  if (model) conditions.push(ilike(inventory.model, `%${model}%`));
+  if (trim) conditions.push(ilike(inventory.trim, `%${trim}%`));
+  if (year) conditions.push(eq(inventory.year, year));
 
   const rows = await db
     .select({
@@ -71,43 +51,25 @@ export async function searchCarAvailability(
     .where(and(...conditions))
     .limit(200);
 
-  if (rows.length === 0) {
-    return [];
-  }
+  if (rows.length === 0) return [];
 
+  // نجيب أرقام التواصل (صاحب المعرض + المناديب) لكل معرض ظهر في النتايج
   const showroomIds = [...new Set(rows.map((r) => r.showroomId))];
-
   const contacts = await db
-    .select({
-      showroomId: users.showroomId,
-      name: users.name,
-      phone: users.phone,
-      role: users.role,
-    })
+    .select({ showroomId: users.showroomId, name: users.name, phone: users.phone, role: users.role })
     .from(users)
-    .where(inArray(users.showroomId, showroomIds));
+    .where(sql`${users.showroomId} = any(${showroomIds})`);
 
-  const contactsByShowroom = new Map<
-    string,
-    CarAvailabilityResult["contacts"]
-  >();
-
-  for (const contact of contacts) {
-    if (!contact.showroomId) continue;
-
-    const list = contactsByShowroom.get(contact.showroomId) ?? [];
-
-    list.push({
-      name: contact.name,
-      phone: contact.phone,
-      role: contact.role,
-    });
-
-    contactsByShowroom.set(contact.showroomId, list);
+  const contactsByShowroom = new Map<string, CarAvailabilityResult["contacts"]>();
+  for (const c of contacts) {
+    if (!c.showroomId) continue;
+    const list = contactsByShowroom.get(c.showroomId) ?? [];
+    list.push({ name: c.name, phone: c.phone, role: c.role });
+    contactsByShowroom.set(c.showroomId, list);
   }
 
-  return rows.map((row) => ({
-    ...row,
-    contacts: contactsByShowroom.get(row.showroomId) ?? [],
+  return rows.map((r) => ({
+    ...r,
+    contacts: contactsByShowroom.get(r.showroomId) ?? [],
   }));
 }
