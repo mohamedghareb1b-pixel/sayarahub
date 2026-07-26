@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 /** يحمي كل مسارات /admin بـ Basic Auth بسيطة (يوزر + باسورد من .env).
  * لو ADMIN_USERNAME / ADMIN_PASSWORD مش متظبطين في .env، الحماية بتتوقف
- * تلقائياً (مفيد وقت التطوير المحلي) — لازم تتظبط قبل أي نشر فعلي. */
-export function middleware(req: NextRequest) {
+ * تلقائياً (مفيد وقت التطوير المحلي) — لازم تتظبط قبل أي نشر فعلي.
+ *
+ * (كان اسمه middleware.ts قبل كده — Next.js 16 غيّر التسمية لـ proxy.ts
+ * والدالة لازم اسمها "proxy" بدل "middleware"، المنطق نفسه من غير تغيير). */
+export function proxy(req: NextRequest) {
   const user = process.env.ADMIN_USERNAME;
   const pass = process.env.ADMIN_PASSWORD;
 
