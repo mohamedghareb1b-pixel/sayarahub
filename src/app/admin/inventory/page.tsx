@@ -213,7 +213,7 @@ export default async function InventoryPage({
                           <input name="color" defaultValue={inv.color ?? ""} placeholder="اللون" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                           <input name="interiorColor" defaultValue={inv.interiorColor ?? ""} placeholder="اللون الداخلي" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                           <input name="city" defaultValue={inv.city} placeholder="المدينة" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
-                          <input name="spec" defaultValue={inv.spec} placeholder="الوكيل" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="spec" defaultValue={inv.spec ?? ""} placeholder="الوكيل" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                           <input name="price" defaultValue={inv.price ?? ""} placeholder="السعر" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                           <input name="quantity" type="number" min={1} defaultValue={inv.quantity} placeholder="الكمية" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
                         </div>
