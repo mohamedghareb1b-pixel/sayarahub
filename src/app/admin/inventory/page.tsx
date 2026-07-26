@@ -198,7 +198,10 @@ export default async function InventoryPage({
                         ✏️ تعديل
                       </summary>
                       <form
-                        action={updateInventoryItem}
+                        action={async (formData: FormData) => {
+                          "use server";
+                          await updateInventoryItem(formData);
+                        }}
                         className="absolute left-0 z-10 mt-2 w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-lg"
                       >
                         <input type="hidden" name="id" value={inv.id} />
