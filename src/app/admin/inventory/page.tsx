@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { inventory, showrooms, users } from "@/db/schema";
 import { desc, eq, and, sql } from "drizzle-orm";
-import { createManualInventoryItem } from "./actions";
+import { createManualInventoryItem, updateInventoryItem, removeInventoryItem } from "./actions";
 import ExcelUploadForm from "./ExcelUploadForm";
 import TargetSearchSelect from "./TargetSearchSelect";
 
@@ -23,11 +23,31 @@ const STATUS_COLOR: Record<string, string> = {
   expired: "bg-rose-100 text-rose-700",
 };
 
-export default async function InventoryPage() {
+export default async function InventoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ phone?: string }>;
+}) {
+  const { phone: phoneQuery } = await searchParams;
+  const normalizedPhone = phoneQuery?.replace(/[^\d+]/g, "").trim() || null;
+
+  // بحث يدوي سريع: اكتب رقم مندوب، يظهر كل مخزونه هو بس — أسرع بكتير من
+  // تصفح 200 صف عشان تعدّل عربية واحدة بتاعته.
+  let targetShowroomId: string | null = null;
+  let matchedRepName: string | null = null;
+  if (normalizedPhone) {
+    const [rep] = await db.select().from(users).where(eq(users.phone, normalizedPhone));
+    if (rep?.showroomId) {
+      targetShowroomId = rep.showroomId;
+      matchedRepName = rep.name;
+    }
+  }
+
   const rows = await db
     .select({ inv: inventory, showroomName: showrooms.name })
     .from(inventory)
     .leftJoin(showrooms, eq(inventory.showroomId, showrooms.id))
+    .where(targetShowroomId ? eq(inventory.showroomId, targetShowroomId) : undefined)
     .orderBy(desc(inventory.createdAt))
     .limit(200);
 
@@ -51,6 +71,34 @@ export default async function InventoryPage() {
         <h1 className="text-2xl font-bold text-slate-900">المخزون</h1>
         <p className="mt-1 text-slate-600">جميع السيارات المضافة عبر البوت أو الرسائل الخام. صلاحية 30 يوم.</p>
       </div>
+
+      {/* بحث سريع برقم المندوب — يظهر مخزونه هو بس عشان تعديل أسرع */}
+      <form method="GET" className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-4">
+        <input
+          name="phone"
+          defaultValue={phoneQuery ?? ""}
+          placeholder="🔍 ابحث برقم المندوب (مثال: 0512345678)"
+          dir="ltr"
+          className="min-w-[220px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+        <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+          بحث
+        </button>
+        {phoneQuery && (
+          <a href="/admin/inventory" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+            مسح البحث
+          </a>
+        )}
+      </form>
+      {normalizedPhone && !targetShowroomId && (
+        <p className="text-sm text-rose-600">مفيش مندوب مسجل بالرقم ده.</p>
+      )}
+      {targetShowroomId && (
+        <p className="text-sm text-slate-500">
+          بيتعرض مخزون: <span className="font-semibold text-slate-700">{matchedRepName ?? normalizedPhone}</span> ({rows.length}{" "}
+          سيارة)
+        </p>
+      )}
 
       {/* إضافة سيارة يدوياً بخانات منفصلة */}
       <form action={createManualInventoryItem} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
@@ -125,11 +173,12 @@ export default async function InventoryPage() {
               <th className="px-4 py-3">المعرض</th>
               <th className="px-4 py-3">الحالة</th>
               <th className="px-4 py-3">تنتهي في</th>
+              <th className="px-4 py-3">إجراءات</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(({ inv, showroomName }) => (
-              <tr key={inv.id} className="border-t border-slate-100">
+              <tr key={inv.id} className="border-t border-slate-100 align-top">
                 <td className="px-4 py-3 font-medium text-slate-900">
                   {[inv.brand, inv.model, inv.year, inv.trim, inv.color, inv.spec].filter(Boolean).join(" ")}
                 </td>
@@ -142,11 +191,58 @@ export default async function InventoryPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-400">{inv.expiresAt.toLocaleDateString("ar-SA")}</td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <details className="relative">
+                      <summary className="cursor-pointer list-none rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                        ✏️ تعديل
+                      </summary>
+                      <form
+                        action={updateInventoryItem}
+                        className="absolute left-0 z-10 mt-2 w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-lg"
+                      >
+                        <input type="hidden" name="id" value={inv.id} />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input name="brand" defaultValue={inv.brand} placeholder="الماركة" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="model" defaultValue={inv.model} placeholder="الموديل" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="trim" defaultValue={inv.trim ?? ""} placeholder="الفئة" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="year" type="number" defaultValue={inv.year} placeholder="السنة" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="color" defaultValue={inv.color ?? ""} placeholder="اللون" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="interiorColor" defaultValue={inv.interiorColor ?? ""} placeholder="اللون الداخلي" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="city" defaultValue={inv.city} placeholder="المدينة" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="spec" defaultValue={inv.spec} placeholder="الوكيل" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="price" defaultValue={inv.price ?? ""} placeholder="السعر" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                          <input name="quantity" type="number" min={1} defaultValue={inv.quantity} placeholder="الكمية" className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                        </div>
+                        <input
+                          name="extraFeatures"
+                          defaultValue={inv.extraFeatures ?? ""}
+                          placeholder="ملاحظات"
+                          className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                        />
+                        <button type="submit" className="w-full rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">
+                          حفظ التعديلات
+                        </button>
+                      </form>
+                    </details>
+                    {inv.status !== "sold" && (
+                      <form action={removeInventoryItem}>
+                        <input type="hidden" name="id" value={inv.id} />
+                        <button
+                          type="submit"
+                          className="rounded-lg border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                        >
+                          🗑️ إزالة
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                   لا توجد سيارات بعد.
                 </td>
               </tr>

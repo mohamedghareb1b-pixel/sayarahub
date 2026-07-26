@@ -1,25 +1,27 @@
-# dependencies
+# ملفات الأسرار — أهم سطر في الملف ده، متمسحوش
+.env
+.env.local
+.env.*.local
+
+# تبعيات
 /node_modules
 
-# next.js
+# بيلد Next.js
 /.next/
 /out/
-
-# production
 /build
 
-# env files (لا ترفع أبداً القيم الحقيقية)
-.env
-.env*.local
-.env.production
-
-# misc
+# ملفات نظام التشغيل والمحرر
 .DS_Store
 *.pem
+.vscode/
+.idea/
+
+# لوجات
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# typescript
+# تايبسكريبت
 *.tsbuildinfo
 next-env.d.ts

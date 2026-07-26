@@ -5,6 +5,7 @@ import { inventory, showrooms } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { buildFingerprint } from "@/lib/fingerprint";
+import { runMatchingForInventory } from "@/lib/matchingEngine";
 import * as XLSX from "xlsx";
 
 /** خانة اختيار "المعرض/المندوب" في الفورمز بتيجي بصيغة موحدة:
@@ -39,7 +40,7 @@ type ManualCarInput = {
 };
 
 async function saveOneInventoryItem(car: ManualCarInput) {
-  if (!car.showroomId || !car.brand || !car.model || !car.year || !car.city) return false;
+  if (!car.showroomId || !car.brand || !car.model || !car.year || !car.city) return null;
 
   const fingerprint = buildFingerprint({
     brand: car.brand,
@@ -57,6 +58,7 @@ async function saveOneInventoryItem(car: ManualCarInput) {
       and(eq(inventory.showroomId, car.showroomId), eq(inventory.fingerprint, fingerprint), eq(inventory.status, "available")),
     );
 
+  let savedId: string;
   if (existing) {
     await db
       .update(inventory)
@@ -69,27 +71,32 @@ async function saveOneInventoryItem(car: ManualCarInput) {
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       })
       .where(eq(inventory.id, existing.id));
+    savedId = existing.id;
   } else {
-    await db.insert(inventory).values({
-      showroomId: car.showroomId,
-      addedBy: car.addedBy,
-      brand: car.brand,
-      model: car.model,
-      year: car.year,
-      trim: car.trim,
-      color: car.color,
-      interiorColor: car.interiorColor,
-      extraFeatures: car.extraFeatures,
-      spec: car.spec,
-      city: car.city,
-      price: car.price,
-      quantity: car.quantity,
-      fingerprint,
-      status: "available",
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    });
+    const [inserted] = await db
+      .insert(inventory)
+      .values({
+        showroomId: car.showroomId,
+        addedBy: car.addedBy,
+        brand: car.brand,
+        model: car.model,
+        year: car.year,
+        trim: car.trim,
+        color: car.color,
+        interiorColor: car.interiorColor,
+        extraFeatures: car.extraFeatures,
+        spec: car.spec,
+        city: car.city,
+        price: car.price,
+        quantity: car.quantity,
+        fingerprint,
+        status: "available",
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      })
+      .returning({ id: inventory.id });
+    savedId = inserted.id;
   }
-  return true;
+  return savedId;
 }
 
 export async function createManualInventoryItem(formData: FormData) {
@@ -108,7 +115,7 @@ export async function createManualInventoryItem(formData: FormData) {
   const price = String(formData.get("price") ?? "").trim() || null;
   const quantity = parseInt(String(formData.get("quantity") ?? "1").trim(), 10) || 1;
 
-  await saveOneInventoryItem({
+  const savedId = await saveOneInventoryItem({
     showroomId: target.showroomId,
     addedBy: target.addedBy,
     brand,
@@ -123,6 +130,10 @@ export async function createManualInventoryItem(formData: FormData) {
     price,
     quantity,
   });
+
+  // بدونها، أي طلب مفتوح فعلاً بيدور على العربية دي مش هيتماتش معاها إلا لو
+  // حد بعت طلب جديد بعد كده — لازم نشغّلها كل مرة نضيف/ندمج مخزون يدوياً.
+  if (savedId) await runMatchingForInventory(savedId);
 
   revalidatePath("/admin/inventory");
 }
@@ -201,7 +212,7 @@ export async function uploadInventorySheet(formData: FormData): Promise<{ ok: bo
       continue;
     }
 
-    const success = await saveOneInventoryItem({
+    const savedId = await saveOneInventoryItem({
       showroomId: target.showroomId,
       addedBy: target.addedBy,
       brand,
@@ -216,10 +227,82 @@ export async function uploadInventorySheet(formData: FormData): Promise<{ ok: bo
       price,
       quantity,
     });
-    if (success) saved++;
-    else skipped++;
+    if (savedId) {
+      saved++;
+      await runMatchingForInventory(savedId);
+    } else {
+      skipped++;
+    }
   }
 
   revalidatePath("/admin/inventory");
   return { ok: true, message: `تم حفظ ${saved} سيارة${skipped > 0 ? ` (وتخطينا ${skipped} صف ناقص بيانات إجبارية)` : ""}.` };
+}
+
+export async function updateInventoryItem(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return { ok: false, message: "عربية غير معروفة." };
+
+  const [existing] = await db.select().from(inventory).where(eq(inventory.id, id));
+  if (!existing) return { ok: false, message: "العربية دي مش موجودة." };
+
+  const brand = String(formData.get("brand") ?? "").trim();
+  const model = String(formData.get("model") ?? "").trim();
+  const trim = String(formData.get("trim") ?? "").trim() || null;
+  const year = parseInt(String(formData.get("year") ?? "").trim(), 10);
+  const color = String(formData.get("color") ?? "").trim() || null;
+  const interiorColor = String(formData.get("interiorColor") ?? "").trim() || null;
+  const city = String(formData.get("city") ?? "").trim();
+  const specInput = String(formData.get("spec") ?? "").trim() || "سعودي";
+  const extraFeatures = String(formData.get("extraFeatures") ?? "").trim() || null;
+  const price = String(formData.get("price") ?? "").trim() || null;
+  const quantity = parseInt(String(formData.get("quantity") ?? "1").trim(), 10) || 1;
+
+  if (!brand || !model || !year || !city) {
+    return { ok: false, message: "الماركة والموديل وسنة الصنع والمدينة إجبارية." };
+  }
+
+  const fingerprint = buildFingerprint({ brand, model, year, trim, color, city });
+
+  // لو الحقول اللي بتدخل في البصمة (ماركة/موديل/سنة/فئة/لون/مدينة) اتغيرت
+  // وبقت مطابقة عربية تانية "متاحة" أصلاً في نفس المعرض، منسمحش بالتعارض —
+  // نرفض ونسيب صاحب القرار يدمجهم بنفسه بدل ما نكرر بصمة موجودة.
+  if (fingerprint !== existing.fingerprint) {
+    const [clash] = await db
+      .select()
+      .from(inventory)
+      .where(
+        and(
+          eq(inventory.showroomId, existing.showroomId),
+          eq(inventory.fingerprint, fingerprint),
+          eq(inventory.status, "available"),
+        ),
+      );
+    if (clash && clash.id !== id) {
+      return { ok: false, message: "فيه عربية تانية بنفس البيانات دي في نفس المعرض بالفعل." };
+    }
+  }
+
+  await db
+    .update(inventory)
+    .set({ brand, model, trim, year, color, interiorColor, city, spec: specInput, extraFeatures, price, quantity, fingerprint })
+    .where(eq(inventory.id, id));
+
+  // لو البصمة اتغيرت (يعني بيانات جوهرية اتعدلت)، نشغّل المطابقة تاني —
+  // ممكن العربية بعد التعديل تبقى مطابقة لطلب مفتوح ماكانتش متطابقة معاه قبل كده.
+  if (fingerprint !== existing.fingerprint) {
+    await runMatchingForInventory(id);
+  }
+
+  revalidatePath("/admin/inventory");
+  return { ok: true, message: "تم تحديث بيانات العربية." };
+}
+
+export async function removeInventoryItem(formData: FormData) {
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return;
+  // إزالة ناعمة (status = sold) بدل حذف فعلي من القاعدة — عشان نحافظ على
+  // سجل تاريخي ونفس المنطق المستخدم لما المندوب نفسه يشيل عربية من "📦 مخزوني".
+  await db.update(inventory).set({ status: "sold" }).where(eq(inventory.id, id));
+  revalidatePath("/admin/inventory");
 }

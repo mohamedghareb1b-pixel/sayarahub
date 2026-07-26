@@ -4,6 +4,8 @@ import { db } from "@/db";
 import { showrooms, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { createPaddleCheckout } from "@/lib/paddle";
+import { enqueueMessage } from "@/lib/whatsapp";
 
 function normalizePhone(phone: string) {
   return phone.replace(/[^\d+]/g, "").trim();
@@ -151,4 +153,35 @@ export async function setSubscriptionPlan(id: string, plan: "free" | "pro") {
     })
     .where(eq(showrooms.id, id));
   revalidatePath("/admin/showrooms");
+}
+
+/** بيولّد رابط دفع Paddle حقيقي للمعرض ده ويبعته على واتساب لصاحبه (أو أول
+ * مندوب تابع له لو معندوش صاحب مسجل). لسه يدوي بالكامل من الأدمن — مفيش
+ * تفعيل تلقائي لما الفترة المجانية تخلص، ده قرار منفصل لسه ماتاخدش. */
+export async function sendSubscriptionLink(showroomId: string): Promise<{ ok: boolean; message: string }> {
+  const [owner] = await db
+    .select({ id: users.id, phone: users.phone })
+    .from(users)
+    .where(eq(users.showroomId, showroomId))
+    .orderBy(users.createdAt)
+    .limit(1);
+
+  if (!owner) {
+    return { ok: false, message: "مفيش أي مندوب مسجل تحت المعرض ده لنبعتله." };
+  }
+
+  try {
+    const checkoutUrl = await createPaddleCheckout(showroomId);
+    await enqueueMessage({
+      toPhone: owner.phone,
+      toUserId: owner.id,
+      messageType: "utility",
+      templateName: "subscription_checkout_link",
+      body: `💳 لإكمال/تجديد اشتراكك في سيارة هب (35 ريال شهرياً)، ادفع من الرابط ده:\n${checkoutUrl}`,
+      isFree: true,
+    });
+    return { ok: true, message: `تم إرسال لينك الدفع لرقم ${owner.phone}.` };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : "فشل إنشاء رابط الدفع." };
+  }
 }

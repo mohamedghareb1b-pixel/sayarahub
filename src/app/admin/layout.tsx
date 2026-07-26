@@ -8,6 +8,7 @@ const NAV = [
   { href: "/admin/inventory", label: "المخزون" },
   { href: "/admin/requests", label: "الطلبات" },
   { href: "/admin/matches", label: "المطابقات" },
+  { href: "/admin/marketing", label: "🎯 رسالة تسويقية" },
   { href: "/admin/queue", label: "طابور الرسائل" },
   { href: "/admin/jobs", label: "المهام المجدولة" },
   { href: "/admin/vocabulary", label: "مفردات البوت" },

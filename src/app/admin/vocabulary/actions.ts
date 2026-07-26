@@ -2,7 +2,7 @@
 
 import { db } from "@/db";
 import { vocabularyTerms, vocabularyReviewQueue } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 export async function addVocabularyTerm(formData: FormData) {
@@ -39,6 +39,18 @@ export async function addVocabularyTerm(formData: FormData) {
         target: [vocabularyTerms.term, vocabularyTerms.category],
         set: { canonicalValue, brand, model },
       });
+
+    // الكلمة بقت رسمية دلوقتي — لو كانت مستنية في قايمة المراجعة قبل كده
+    // (من فورم تاني غير زرار "حسم" اللي بيمسحها هو بنفسه)، نشيلها من هناك
+    // عشان متفضلش ظاهرة كأنها لسه معلّقة.
+    await db
+      .delete(vocabularyReviewQueue)
+      .where(
+        and(
+          eq(vocabularyReviewQueue.term, term),
+          eq(vocabularyReviewQueue.category, category as "trim" | "color" | "feature" | "model_alias" | "stopword" | "brand_alias"),
+        ),
+      );
   }
 
   revalidatePath("/admin/vocabulary");
@@ -87,6 +99,15 @@ export async function bulkAddVocabularyTerms(formData: FormData) {
           model: category === "model_alias" ? model || null : null,
         },
       });
+
+    await db
+      .delete(vocabularyReviewQueue)
+      .where(
+        and(
+          eq(vocabularyReviewQueue.term, term),
+          eq(vocabularyReviewQueue.category, category as "trim" | "color" | "feature" | "model_alias" | "stopword" | "brand_alias"),
+        ),
+      );
   }
 
   revalidatePath("/admin/vocabulary");

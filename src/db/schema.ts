@@ -98,6 +98,14 @@ export const showrooms = pgTable("showrooms", {
     .default(sql`now() + interval '30 days'`),
   monthlyConfirmedMatches: integer("monthly_confirmed_matches").notNull().default(0),
   maxConfirmedMatches: integer("max_confirmed_matches").notNull().default(999999),
+  // بداية الـ14 يوم التجريبية المجانية — بتتسجل أول مرة المعرض ده يكون طرف
+  // في "ماتش" اتأكد فعلياً (connected)، سواء كان هو صاحب المخزون أو الطالب،
+  // مش من وقت التسجيل. null يعني لسه مفعّلش تجربته المجانية.
+  trialStartedAt: timestamp("trial_started_at", { withTimezone: true }),
+  // ربط المعرض باشتراك Paddle الحقيقي — بيتسجلوا من الـwebhook أول ما
+  // الدفع ينجح، ومستخدمين بعدين لأي عملية متابعة/إلغاء.
+  paddleCustomerId: text("paddle_customer_id"),
+  paddleSubscriptionId: text("paddle_subscription_id"),
   isPersonalPool: boolean("is_personal_pool").notNull().default(false), // مخزون مندوب حر بيجمعه بنفسه، مش معرض حقيقي
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -229,7 +237,7 @@ export const requests = pgTable(
     status: requestStatusEnum("status").notNull().default("open"),
     expiresAt: timestamp("expires_at", { withTimezone: true })
       .notNull()
-      .default(sql`now() + interval '12 hours'`),
+      .default(sql`now() + interval '3 hours'`),
     renewedCount: integer("renewed_count").notNull().default(0),
     reminderSent: boolean("reminder_sent").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

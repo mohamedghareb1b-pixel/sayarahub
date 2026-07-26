@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { sql, eq, and } from "drizzle-orm";
+import { sql, eq, and, desc } from "drizzle-orm";
 import {
   users,
   showrooms,
@@ -14,6 +14,8 @@ import { enqueueMessage, logInbound, type Button } from "./whatsapp";
 import { parseFreeText, extractFieldAnswer, lookupCorrection, saveCorrection, EXTRA_FEATURE_WORDS, type ParsedCar } from "./parser";
 import { buildFingerprint } from "./fingerprint";
 import { runMatchingForRequest, runMatchingForInventory, confirmMatch, declineMatch } from "./matchingEngine";
+import { getSubscriptionStatus } from "./subscription";
+import { createPaddleCheckout } from "./paddle";
 import { classifyKeyword, normalizeForMatch } from "./textClean";
 import { SAUDI_CITIES, CAR_BRANDS, COLORS, findModelInText } from "./carData";
 import { findDynamicBrandAlias, findDynamicTerm, getVocabCache } from "./vocabulary";
@@ -28,6 +30,9 @@ type ConversationState = {
     | "ask_missing_field"
     | "editing_field"
     | "editing_profile_field"
+    | "viewing_inventory"
+    | "inventory_item_action"
+    | "editing_inventory_safe_field"
     | "idle";
   pendingRepName?: string;
   pendingShowroomName?: string;
@@ -38,6 +43,9 @@ type ConversationState = {
   editingField?: string;
   editingProfileField?: "name" | "showroom" | "city";
   pendingJoinShowroomId?: string;
+  inventoryList?: string[];
+  inventoryActionId?: string;
+  invSafeField?: "price" | "extraFeatures" | "spec";
 };
 
 const FIELD_QUESTIONS: Record<string, string> = {
@@ -83,6 +91,30 @@ async function reply(phone: string, body: string, buttons?: Button[], toUserId?:
   await enqueueMessage({ toPhone: phone, body, buttons, toUserId, isFree: true });
 }
 
+/** بيتحقق إن المعرض المرتبط بالمستخدم لسه مسموحله يستخدم النظام (تجربة +
+ * سماح متجاوزتش)، ولو لأ بيبعت رسالة توضح انتهاء الفترة مع رابط دفع Paddle
+ * حقيقي ويرجع false عشان الاستدعاء اللي بعده يوقف على طول. */
+async function ensureSubscriptionAllowed(phone: string, userId: string, showroomId: string | null): Promise<boolean> {
+  if (!showroomId) return true; // لسه معندوش معرض أصلاً، مفيش حاجة نمنعها
+  const status = await getSubscriptionStatus(showroomId);
+  if (status.allowed) return true;
+
+  let checkoutLine = "";
+  try {
+    const checkoutUrl = await createPaddleCheckout(showroomId);
+    checkoutLine = `\n\nفعّل اشتراكك (35 ريال شهرياً) من هنا:\n${checkoutUrl}`;
+  } catch {
+    checkoutLine = "\n\nتواصل معانا لتفعيل اشتراكك.";
+  }
+  await reply(
+    phone,
+    `⏸️ انتهت فترتك المجانية (14 يوم تجربة + يومين سماح). عشان تكمل تستخدم سيارة هب لازم تفعّل الاشتراك.${checkoutLine}`,
+    undefined,
+    userId,
+  );
+  return false;
+}
+
 async function findShowroomBySimilarName(name: string) {
   try {
     const result = await db.execute<{ id: string; name: string; city: string; sim: number }>(
@@ -118,6 +150,7 @@ function idleMenuButtons(): Button[] {
  * طلب/سيارة يخلص — عشان كل الخيارات الأساسية تكون قدام المستخدم مرة واحدة. */
 function fullActionButtons(): Button[] {
   return [
+    { id: "view_inventory", title: "📦 مخزوني" },
     { id: "excel_via_admin", title: "📤 أرسل مخزونك" },
     { id: "work_details", title: "📋 تفاصيل العمل" },
     { id: "edit_profile", title: "✏️ تعديل بياناتي" },
@@ -369,7 +402,7 @@ async function finalizeParsed(user: typeof users.$inferSelect, parsed: ParsedCar
     const reqId = await createRequest(user.showroomId, user.id, parsed);
     await reply(
       user.phone,
-      `🔎 تم تسجيل طلبك: ${summarize(parsed)}\nسنبحث لك في مخزون بقية المعارض وسنعلمك فور توفر تطابق. الطلب صالح 12 ساعة.`,
+      `🔎 تم تسجيل طلبك: ${summarize(parsed)}\nسنبحث لك في مخزون بقية المعارض وسنعلمك فور توفر تطابق. الطلب صالح 3 ساعات.`,
       fullActionButtons(),
       user.id,
     );
@@ -503,6 +536,82 @@ export async function handleIncomingMessage(input: {
       return;
     }
 
+    if (btn === "view_inventory") {
+      if (!user.showroomId) {
+        await reply(user.phone, "لسه معندكش مخزون مسجل. دوس \"🚗 عندي سيارة\" عشان تضيف أول عربية.", fullActionButtons(), user.id);
+        return;
+      }
+      const items = await db
+        .select()
+        .from(inventoryTable)
+        .where(and(eq(inventoryTable.showroomId, user.showroomId), eq(inventoryTable.status, "available")))
+        .orderBy(desc(inventoryTable.createdAt))
+        .limit(20);
+      if (items.length === 0) {
+        await reply(user.phone, "📦 مخزونك فاضي دلوقتي. دوس \"🚗 عندي سيارة\" عشان تضيف أول عربية.", fullActionButtons(), user.id);
+        return;
+      }
+      const lines = items.map((it, i) =>
+        `${i + 1}. ${it.brand} ${it.model} ${it.trim ?? ""} ${it.year} ${it.color ?? ""}`.replace(/\s+/g, " ").trim(),
+      );
+      await setState(user.id, { step: "viewing_inventory", inventoryList: items.map((it) => it.id) });
+      await reply(
+        user.phone,
+        `📦 مخزونك الحالي (${items.length}):\n\n${lines.join("\n")}\n\nاكتب رقم العربية اللي عايز تتصرف فيها (تشيلها أو تعدّل بيانات فيها)، أو اكتب 0 للرجوع.`,
+        undefined,
+        user.id,
+      );
+      return;
+    }
+
+    if (btn === "inv_remove" && st.step === "inventory_item_action" && st.inventoryActionId && user.showroomId) {
+      await db
+        .update(inventoryTable)
+        .set({ status: "sold" })
+        .where(and(eq(inventoryTable.id, st.inventoryActionId), eq(inventoryTable.showroomId, user.showroomId)));
+      await setState(user.id, { step: "idle" });
+      await reply(
+        user.phone,
+        "✅ تمام، شلناها من مخزونك. لو مسجلة غلط وحابب تضيفها تاني صح، دوس \"🚗 عندي سيارة\".",
+        fullActionButtons(),
+        user.id,
+      );
+      return;
+    }
+
+    if (btn === "inv_edit_safe" && st.step === "inventory_item_action" && st.inventoryActionId) {
+      await reply(
+        user.phone,
+        "تمام، إيه اللي عايز تعدّله؟\n(لو الغلط في الماركة/الموديل/السنة/اللون/المدينة، الأسهل إنك تشيل العربية دي وتضيفها تاني صح من \"🚗 عندي سيارة\")",
+        [
+          { id: "invsafefield:price", title: "💰 السعر" },
+          { id: "invsafefield:spec", title: "🏷️ الوكيل" },
+          { id: "invsafefield:extraFeatures", title: "📝 ملاحظات" },
+        ],
+        user.id,
+      );
+      return;
+    }
+
+    if (btn.startsWith("invsafefield:") && st.step === "inventory_item_action" && st.inventoryActionId) {
+      const field = btn.replace("invsafefield:", "") as "price" | "extraFeatures" | "spec";
+      await setState(user.id, {
+        step: "editing_inventory_safe_field",
+        inventoryActionId: st.inventoryActionId,
+        invSafeField: field,
+      });
+      const question =
+        field === "price" ? "اكتب السعر الجديد (أرقام بس):" : field === "spec" ? "اكتب الوكيل الجديد:" : "اكتب الملاحظات الجديدة:";
+      await reply(user.phone, question, undefined, user.id);
+      return;
+    }
+
+    if (btn === "inv_back" && st.step === "inventory_item_action") {
+      await setState(user.id, { step: "idle" });
+      await reply(user.phone, "تمام، رجعناك للقائمة الأساسية.", fullActionButtons(), user.id);
+      return;
+    }
+
     if (btn === "edit_profile") {
       await reply(
         user.phone,
@@ -559,6 +668,7 @@ export async function handleIncomingMessage(input: {
     }
 
     if (btn === "guided_supply" || btn === "guided_supply_start" || btn === "guided_demand") {
+      if (!(await ensureSubscriptionAllowed(user.phone, user.id, user.showroomId))) return;
       const type: "supply" | "demand" = btn === "guided_demand" ? "demand" : "supply";
       // المدينة بتتاخد تلقائي من بروفايل المستخدم — لكل مندوب "معرض شخصي"
       // اتسجلت مدينته وقت التسجيل في showrooms.city (مش في users.city، اللي
@@ -676,6 +786,7 @@ export async function handleIncomingMessage(input: {
     }
 
     if (btn === "confirm_yes" && st.pendingParsed) {
+      if (!(await ensureSubscriptionAllowed(user.phone, user.id, user.showroomId))) return;
       await setState(user.id, { step: "idle" });
       if (st.originalText) {
         saveCorrection(st.originalText, st.pendingParsed, "user_confirmed").catch(() => {});
@@ -695,6 +806,7 @@ export async function handleIncomingMessage(input: {
     }
 
     if (btn.startsWith("match_yes_")) {
+      if (!(await ensureSubscriptionAllowed(user.phone, user.id, user.showroomId))) return;
       const matchId = btn.replace("match_yes_", "");
       const result = await confirmMatch(matchId);
       if (result.ok) {
@@ -715,9 +827,9 @@ export async function handleIncomingMessage(input: {
       const reqId = btn.replace("renew_", "");
       await db
         .update(requestsTable)
-        .set({ expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), reminderSent: false, renewedCount: sql`${requestsTable.renewedCount} + 1` })
+        .set({ expiresAt: new Date(Date.now() + 3 * 60 * 60 * 1000), reminderSent: false, renewedCount: sql`${requestsTable.renewedCount} + 1` })
         .where(eq(requestsTable.id, reqId));
-      await reply(user.phone, "🔄 تم تجديد الطلب لمدة 12 ساعة إضافية.", undefined, user.id);
+      await reply(user.phone, "🔄 تم تجديد الطلب لمدة 3 ساعات إضافية.", undefined, user.id);
       return;
     }
     if (btn.startsWith("cancel_")) {
@@ -769,6 +881,57 @@ export async function handleIncomingMessage(input: {
     }
     await setState(user.id, { step: "idle" });
     await reply(user.phone, `✅ تم تحديث اسم المعرض إلى ${text}.`, fullActionButtons(), user.id);
+    return;
+  }
+
+  // ── اختيار رقم عربية من ليستة "📦 مخزوني" ────────────────────────────
+  if (st.step === "viewing_inventory" && text) {
+    const num = parseInt(text.trim(), 10);
+    if (text.trim() === "0") {
+      await setState(user.id, { step: "idle" });
+      await reply(user.phone, "تمام، رجعناك للقائمة الأساسية.", fullActionButtons(), user.id);
+      return;
+    }
+    const list = st.inventoryList ?? [];
+    if (!Number.isFinite(num) || num < 1 || num > list.length) {
+      await reply(user.phone, `اكتب رقم من 1 إلى ${list.length}، أو 0 للرجوع.`, undefined, user.id);
+      return;
+    }
+    const chosenId = list[num - 1];
+    await setState(user.id, { step: "inventory_item_action", inventoryActionId: chosenId, inventoryList: list });
+    await reply(
+      user.phone,
+      "تمام، عايز تعمل إيه في العربية دي؟",
+      [
+        { id: "inv_remove", title: "🗑️ اتباعت / شيلها" },
+        { id: "inv_edit_safe", title: "✏️ تعديل بيانات" },
+        { id: "inv_back", title: "🔙 رجوع" },
+      ],
+      user.id,
+    );
+    return;
+  }
+
+  // ── تعديل حقل آمن (السعر/الوكيل/الملاحظات) في عربية متسجلة بالفعل ────
+  // مقصورة على الحقول اللي مش داخلة في حساب الـ fingerprint (ماركة/موديل/
+  // سنة/فئة/لون/مدينة)، عشان مانحتاجش نعيد حساب البصمة أو نتحقق من تعارضها
+  // مع عربية تانية. أي تعديل في الحقول دي الأسلم إنه يشيل ويضيف تاني.
+  if (st.step === "editing_inventory_safe_field" && st.inventoryActionId && st.invSafeField && text) {
+    const field = st.invSafeField;
+    if (field === "price") {
+      const priceNum = Number(text.replace(/[^\d.]/g, ""));
+      if (!Number.isFinite(priceNum) || priceNum <= 0) {
+        await reply(user.phone, "اكتب السعر أرقام بس (مثال: 85000).", undefined, user.id);
+        return;
+      }
+      await db.update(inventoryTable).set({ price: String(priceNum) }).where(eq(inventoryTable.id, st.inventoryActionId));
+    } else if (field === "spec") {
+      await db.update(inventoryTable).set({ spec: text }).where(eq(inventoryTable.id, st.inventoryActionId));
+    } else {
+      await db.update(inventoryTable).set({ extraFeatures: text }).where(eq(inventoryTable.id, st.inventoryActionId));
+    }
+    await setState(user.id, { step: "idle" });
+    await reply(user.phone, "✅ تم تحديث بيانات العربية.", fullActionButtons(), user.id);
     return;
   }
 

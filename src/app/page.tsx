@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
+import LegalFooter from "@/components/LegalFooter";
 
 export const dynamic = "force-dynamic";
 
@@ -116,9 +117,7 @@ export default async function HomePage() {
           </ol>
         </section>
 
-        <footer className="mt-16 text-center text-xs text-slate-400">
-          SayaraHub V1.0 — Smart Intermediation فقط، لا تسعير، لا تفاوض، لا دفع داخل المنصة.
-        </footer>
+        <LegalFooter />
       </div>
     </main>
   );

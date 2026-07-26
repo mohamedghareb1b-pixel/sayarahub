@@ -101,7 +101,7 @@ export async function runMatchingForRequest(requestId: string) {
         messageType: "utility",
         templateName: "match_broadcast",
         templateParams: { brand: req.brand, model: req.model, year: req.year },
-        body: `🔔 في حد بيدور على سيارة زي اللي عندك:\n${fullLabel}\n\nمتوفرة عندك دلوقتي؟`,
+        body: `🚗 سيارة هب: 🔔 في حد بيدور على سيارة زي اللي عندك:\n${fullLabel}\n\nمتوفرة عندك دلوقتي؟`,
         buttons: [
           { id: `match_yes_${match.id}`, title: "✅ متوفر" },
           { id: `match_no_${match.id}`, title: "❌ غير متوفر" },
@@ -241,6 +241,20 @@ export async function confirmMatch(matchId: string) {
     .update(showrooms)
     .set({ monthlyConfirmedMatches: (supplierShowroom?.monthlyConfirmedMatches ?? 0) + 1 })
     .where(eq(showrooms.id, inv.showroomId));
+
+  // أول ماتش "connected" فعلي لكل معرض (سواء كطرف مورد أو طالب) هو اللي
+  // بيشغّل عداد الـ14 يوم المجانية بتاعه — لو already trialStartedAt متسجلة
+  // من قبل، الـ coalesce هنا بيسيبها زي ما هي ومايعملش override.
+  await db
+    .update(showrooms)
+    .set({ trialStartedAt: sql`coalesce(${showrooms.trialStartedAt}, now())` })
+    .where(eq(showrooms.id, inv.showroomId));
+  if (req.showroomId) {
+    await db
+      .update(showrooms)
+      .set({ trialStartedAt: sql`coalesce(${showrooms.trialStartedAt}, now())` })
+      .where(eq(showrooms.id, req.showroomId));
+  }
 
   return { ok: true as const };
 }

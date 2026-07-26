@@ -4,6 +4,7 @@ import { asc, eq, and, sql, ilike } from "drizzle-orm";
 import {
   toggleShowroomActive,
   setSubscriptionPlan,
+  sendSubscriptionLink,
   updateUserName,
   removeUserFromShowroom,
   deleteUserAccount,
@@ -11,6 +12,7 @@ import {
 } from "./actions";
 import RegistrationToggle from "./RegistrationToggle";
 import AddRepInline from "./AddRepInline";
+import SendSubscriptionLinkButton from "./SendSubscriptionLinkButton";
 
 export const dynamic = "force-dynamic";
 
@@ -228,6 +230,9 @@ export default async function ShowroomsPage({
                       {s.subscriptionPlan === "pro" ? "Pro" : "Free"}
                     </button>
                   </form>
+                  <div className="mt-2">
+                    <SendSubscriptionLinkButton showroomId={s.id} />
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <span
