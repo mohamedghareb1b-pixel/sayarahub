@@ -1,4 +1,5 @@
 import { handleIncomingMessage } from "@/lib/botEngine";
+import { processQueue } from "@/lib/whatsapp";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,8 @@ export async function POST(req: Request) {
         }
       }
     }
+
+    await processQueue(50);
 
     return Response.json({ ok: true });
   } catch (err) {
