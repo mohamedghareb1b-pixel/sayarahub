@@ -828,7 +828,30 @@ export async function handleIncomingMessage(input: {
       await reply(
         user.phone,
         "أي حقل عايز تعدّله؟",
-        EDITABLE_FIELD_LABELS.map((f) => ({ id: `editfield:${f.field}`, title: f.label })),
+        [
+          { id: "editfield:brand", title: "الماركة" },
+          { id: "editfield:model", title: "الموديل" },
+          { id: "editfield:trim", title: "الفئة" },
+        ],
+        user.id,
+      );
+      await reply(
+        user.phone,
+        "أو:",
+        [
+          { id: "editfield:year", title: "السنة" },
+          { id: "editfield:color", title: "اللون" },
+          { id: "editfield:city", title: "المدينة" },
+        ],
+        user.id,
+      );
+      await reply(
+        user.phone,
+        "أو:",
+        [
+          { id: "editfield:spec", title: "الوكيل" },
+          { id: "editfield:extraFeatures", title: "ملاحظات" },
+        ],
         user.id,
       );
       return;
