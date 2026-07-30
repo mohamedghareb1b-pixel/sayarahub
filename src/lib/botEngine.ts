@@ -71,9 +71,8 @@ const EDITABLE_FIELD_LABELS: { field: string; label: string }[] = [
   { field: "extraFeatures", label: "ملاحظات" },
 ];
 
-function cityButtons(): Button[] {
-  return SAUDI_CITIES.map((c) => ({ id: `city:${c}`, title: c }));
-}
+// المدينة أصبحت نص حر — الدالة دي متستخدمش تاني
+// function cityButtons() removed
 
 function normalizePhone(phone: string) {
   return phone.replace(/[^\d+]/g, "").trim();
@@ -140,22 +139,41 @@ async function findShowroomBySimilarName(name: string) {
  * يبدأ بيها إدخال سيارة جديدة بدل ما يعتمد بس على الكتابة الحرة. */
 function idleMenuButtons(): Button[] {
   return [
-    { id: "guided_supply", title: "🚗 عندي سيارة (متوفر)" },
-    { id: "guided_demand", title: "🔍 عايز سيارة (مطلوب)" },
+    { id: "guided_supply", title: "🚗 عندي سيارة" },
+    { id: "guided_demand", title: "🔍 عايز سيارة" },
+    { id: "view_inventory", title: "📦 مخزوني" },
+  ];
+}
+
+function idleMenuButtons2(): Button[] {
+  return [
+    { id: "excel_via_admin", title: "📤 أرسل مخزونك" },
+    { id: "work_details", title: "📋 تفاصيل العمل" },
     { id: "edit_profile", title: "✏️ تعديل بياناتي" },
   ];
 }
 
-/** المجموعة الكاملة (4 أزرار) اللي بتظهر بعد التسجيل مباشرة، وبعد أي إدخال
- * طلب/سيارة يخلص — عشان كل الخيارات الأساسية تكون قدام المستخدم مرة واحدة. */
+/** بعد التسجيل وبعد أي عملية — بتبعت رسالتين عشان تظهر كل الأزرار */
 function fullActionButtons(): Button[] {
   return [
+    { id: "guided_supply", title: "🚗 عندي سيارة" },
+    { id: "guided_demand", title: "🔍 عايز سيارة" },
     { id: "view_inventory", title: "📦 مخزوني" },
+  ];
+}
+
+function fullActionButtons2(): Button[] {
+  return [
     { id: "excel_via_admin", title: "📤 أرسل مخزونك" },
     { id: "work_details", title: "📋 تفاصيل العمل" },
     { id: "edit_profile", title: "✏️ تعديل بياناتي" },
-    { id: "guided_demand", title: "🔍 عايز سيارة" },
   ];
+}
+
+/** بيبعت رسالتين بالأزرار الكاملة بدل رسالة واحدة — عشان واتساب بيسمح 3 أزرار بس */
+async function replyWithFullMenu(phone: string, msg: string, userId: string) {
+  await reply(phone, msg, fullActionButtons(), userId);
+  await reply(phone, "المزيد من الخيارات:", fullActionButtons2(), userId);
 }
 
 // رقم واتساب الأدمن اللي بيستقبل ملفات الإكسل ويرفعها بنفسه من لوحة التحكم
@@ -288,10 +306,9 @@ async function completeRepRegistration(
     .where(eq(users.id, user.id));
   await db.update(showrooms).set({ ownerUserId: user.id }).where(eq(showrooms.id, pool.id));
 
-  await reply(
+  await replyWithFullMenu(
     user.phone,
     `🎉 تمام يا ${repName ?? ""}! سجلناك بنجاح.\n📍 ${workLabel ?? ""} — ${city}`,
-    fullActionButtons(),
     user.id,
   );
 }
@@ -391,27 +408,24 @@ async function finalizeParsed(user: typeof users.$inferSelect, parsed: ParsedCar
   }
   if (parsed.type === "supply") {
     const invId = await upsertInventory(user.showroomId, user.id, parsed);
-    await reply(
+    await replyWithFullMenu(
       user.phone,
       `✅ تم إضافة السيارة لمخزونك: ${summarize(parsed)}\nستبقى متاحة 30 يوم أو حتى يتم توصيلها.`,
-      fullActionButtons(),
       user.id,
     );
     await runMatchingForInventory(invId);
   } else if (parsed.type === "demand") {
     const reqId = await createRequest(user.showroomId, user.id, parsed);
-    await reply(
+    await replyWithFullMenu(
       user.phone,
       `🔎 تم تسجيل طلبك: ${summarize(parsed)}\nسنبحث لك في مخزون بقية المعارض وسنعلمك فور توفر تطابق. الطلب صالح 3 ساعات.`,
-      fullActionButtons(),
       user.id,
     );
     await runMatchingForRequest(reqId);
   } else {
-    await reply(
+    await replyWithFullMenu(
       user.phone,
       "لم أفهم إن كان هذا طلب أم عرض، أرسل مثلاً: مطلوب أو متوفر ثم تفاصيل السيارة.",
-      fullActionButtons(),
       user.id,
     );
   }
@@ -538,7 +552,11 @@ export async function handleIncomingMessage(input: {
 
     if (btn === "view_inventory") {
       if (!user.showroomId) {
-        await reply(user.phone, "لسه معندكش مخزون مسجل. دوس \"🚗 عندي سيارة\" عشان تضيف أول عربية.", fullActionButtons(), user.id);
+        await replyWithFullMenu(
+      user.phone,
+      "لسه معندكش مخزون مسجل. دوس \"🚗 عندي سيارة\" عشان تضيف أول عربية.",
+      user.id,
+    );
         return;
       }
       const items = await db
@@ -548,7 +566,11 @@ export async function handleIncomingMessage(input: {
         .orderBy(desc(inventoryTable.createdAt))
         .limit(20);
       if (items.length === 0) {
-        await reply(user.phone, "📦 مخزونك فاضي دلوقتي. دوس \"🚗 عندي سيارة\" عشان تضيف أول عربية.", fullActionButtons(), user.id);
+        await replyWithFullMenu(
+      user.phone,
+      "📦 مخزونك فاضي دلوقتي. دوس \"🚗 عندي سيارة\" عشان تضيف أول عربية.",
+      user.id,
+    );
         return;
       }
       const lines = items.map((it, i) =>
@@ -557,576 +579,3 @@ export async function handleIncomingMessage(input: {
       await setState(user.id, { step: "viewing_inventory", inventoryList: items.map((it) => it.id) });
       await reply(
         user.phone,
-        `📦 مخزونك الحالي (${items.length}):\n\n${lines.join("\n")}\n\nاكتب رقم العربية اللي عايز تتصرف فيها (تشيلها أو تعدّل بيانات فيها)، أو اكتب 0 للرجوع.`,
-        undefined,
-        user.id,
-      );
-      return;
-    }
-
-    if (btn === "inv_remove" && st.step === "inventory_item_action" && st.inventoryActionId && user.showroomId) {
-      await db
-        .update(inventoryTable)
-        .set({ status: "sold" })
-        .where(and(eq(inventoryTable.id, st.inventoryActionId), eq(inventoryTable.showroomId, user.showroomId)));
-      await setState(user.id, { step: "idle" });
-      await reply(
-        user.phone,
-        "✅ تمام، شلناها من مخزونك. لو مسجلة غلط وحابب تضيفها تاني صح، دوس \"🚗 عندي سيارة\".",
-        fullActionButtons(),
-        user.id,
-      );
-      return;
-    }
-
-    if (btn === "inv_edit_safe" && st.step === "inventory_item_action" && st.inventoryActionId) {
-      await reply(
-        user.phone,
-        "تمام، إيه اللي عايز تعدّله؟\n(لو الغلط في الماركة/الموديل/السنة/اللون/المدينة، الأسهل إنك تشيل العربية دي وتضيفها تاني صح من \"🚗 عندي سيارة\")",
-        [
-          { id: "invsafefield:price", title: "💰 السعر" },
-          { id: "invsafefield:spec", title: "🏷️ الوكيل" },
-          { id: "invsafefield:extraFeatures", title: "📝 ملاحظات" },
-        ],
-        user.id,
-      );
-      return;
-    }
-
-    if (btn.startsWith("invsafefield:") && st.step === "inventory_item_action" && st.inventoryActionId) {
-      const field = btn.replace("invsafefield:", "") as "price" | "extraFeatures" | "spec";
-      await setState(user.id, {
-        step: "editing_inventory_safe_field",
-        inventoryActionId: st.inventoryActionId,
-        invSafeField: field,
-      });
-      const question =
-        field === "price" ? "اكتب السعر الجديد (أرقام بس):" : field === "spec" ? "اكتب الوكيل الجديد:" : "اكتب الملاحظات الجديدة:";
-      await reply(user.phone, question, undefined, user.id);
-      return;
-    }
-
-    if (btn === "inv_back" && st.step === "inventory_item_action") {
-      await setState(user.id, { step: "idle" });
-      await reply(user.phone, "تمام، رجعناك للقائمة الأساسية.", fullActionButtons(), user.id);
-      return;
-    }
-
-    if (btn === "edit_profile") {
-      await reply(
-        user.phone,
-        "تمام، إيه اللي عايز تعدّله؟",
-        [
-          { id: "editprofile:name", title: "👤 اسمي" },
-          { id: "editprofile:showroom", title: "🏢 اسم المعرض" },
-          { id: "editprofile:city", title: "📍 المدينة" },
-        ],
-        user.id,
-      );
-      return;
-    }
-
-    if (btn.startsWith("editprofile:")) {
-      const field = btn.replace("editprofile:", "") as "name" | "showroom" | "city";
-      await setState(user.id, { step: "editing_profile_field", editingProfileField: field });
-      if (field === "name") {
-        await reply(user.phone, "تمام، اكتب اسمك الجديد:", undefined, user.id);
-      } else if (field === "showroom") {
-        await reply(user.phone, "تمام، اكتب اسم المعرض/الجهة الجديد:", undefined, user.id);
-      } else {
-        await reply(user.phone, "اختر المدينة الجديدة:", cityButtons(), user.id);
-      }
-      return;
-    }
-
-    if (btn === "guided_supply") {
-      // نوري مخزونه الحالي الأول قبل ما نبدأ نسأله عن سيارة جديدة
-      const existing = user.showroomId
-        ? await db
-            .select()
-            .from(inventoryTable)
-            .where(and(eq(inventoryTable.showroomId, user.showroomId), eq(inventoryTable.status, "available")))
-            .limit(20)
-        : [];
-
-      if (existing.length > 0) {
-        const list = existing
-          .map((c, i) => `${i + 1}. ${[c.brand, c.model, c.trim, c.year, c.color].filter(Boolean).join(" ")}`)
-          .join("\n");
-        await reply(
-          user.phone,
-          `📦 مخزونك الحالي (${existing.length}):\n${list}\n\nعايز تعمل إيه؟`,
-          [
-            { id: "guided_supply_start", title: "➕ إضافة سيارة جديدة" },
-            { id: "excel_via_admin", title: "📤 راسل الإدارة" },
-          ],
-          user.id,
-        );
-        return;
-      }
-      // مفيش مخزون قديم — كمّل على طول لفلو الإضافة
-    }
-
-    if (btn === "guided_supply" || btn === "guided_supply_start" || btn === "guided_demand") {
-      if (!(await ensureSubscriptionAllowed(user.phone, user.id, user.showroomId))) return;
-      const type: "supply" | "demand" = btn === "guided_demand" ? "demand" : "supply";
-      // المدينة بتتاخد تلقائي من بروفايل المستخدم — لكل مندوب "معرض شخصي"
-      // اتسجلت مدينته وقت التسجيل في showrooms.city (مش في users.city، اللي
-      // بيفضل دايماً فاضي في المنطق الجديد لأننا بقينا بننشئ معرض شخصي لكل
-      // مندوب بدل ما نخزّن المدينة على حسابه مباشرة). القراءة القديمة من
-      // user.city كانت بترجع null دايماً تقريباً، فالمدينة كانت بترجع تتسأل
-      // تاني كل مرة رغم إنها مفروض تتشال من الأسئلة.
-      let profileCity: string | null = user.city ?? null;
-      if (!profileCity && user.showroomId) {
-        const [ownShowroom] = await db.select().from(showrooms).where(eq(showrooms.id, user.showroomId));
-        profileCity = ownShowroom?.city ?? null;
-      }
-      const empty: ParsedCar = {
-        type,
-        brand: null,
-        model: null,
-        year: null,
-        trim: null,
-        color: null,
-        interiorColor: null,
-        extraFeatures: null,
-        engineSize: null,
-        seats: null,
-        fuelType: null,
-        transmission: null,
-        spec: "سعودي",
-        city: profileCity,
-        quantity: 1,
-        price: null,
-        confidence: 1,
-        missingFields: [],
-      };
-      // الترتيب: ماركة، موديل، فئة، سنة الصنع (ينفع أكتر من سنة بـ /)، لون،
-      // الوكيل، ملاحظات. المدينة اتشالت من الأسئلة لأنها تلقائية من البروفايل.
-      const queue = profileCity
-        ? ["brand", "model", "trim", "year", "color", "spec", "extraFeatures"]
-        : ["brand", "model", "trim", "year", "color", "spec", "city", "extraFeatures"];
-      await setState(user.id, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
-      await askNextMissingField(user, { step: "ask_missing_field", pendingParsed: empty, missingFieldQueue: queue });
-      return;
-    }
-
-    if (btn.startsWith("editfield:") && st.pendingParsed) {
-      const field = btn.replace("editfield:", "");
-      await setState(user.id, {
-        step: "editing_field",
-        pendingParsed: st.pendingParsed,
-        originalText: st.originalText,
-        editingField: field,
-      });
-      if (field === "city") {
-        await reply(user.phone, "اختر المدينة:", cityButtons(), user.id);
-      } else {
-        await reply(user.phone, FIELD_QUESTIONS[field] ?? `اكتب القيمة الجديدة لـ ${field}`, undefined, user.id);
-      }
-      return;
-    }
-
-    if (btn.startsWith("city:")) {
-      const cityName = btn.replace("city:", "");
-
-      // حالة 1: اختيار المدينة أثناء التسجيل لأول مرة
-      if (st.step === "ask_rep_city") {
-        await completeRepRegistration(user, st.pendingRepName, st.pendingShowroomName, cityName);
-        return;
-      }
-
-      // حالة 2: اختيار المدينة الجديدة أثناء تعديل بروفايل المستخدم نفسه
-      // (مش طلب/عرض) — بتتحدث في showrooms.city مباشرة لأن دي المصدر
-      // الحقيقي لمدينة المندوب اللي بيتاخد منها تلقائي في أي طلب/عرض جديد.
-      if (st.step === "editing_profile_field" && st.editingProfileField === "city") {
-        if (user.showroomId) {
-          await db.update(showrooms).set({ city: cityName }).where(eq(showrooms.id, user.showroomId));
-        }
-        await setState(user.id, { step: "idle" });
-        await reply(user.phone, `✅ تم تحديث مدينتك إلى ${cityName}.`, fullActionButtons(), user.id);
-        return;
-      }
-
-      // حالة 3: اختيار المدينة أثناء تعديل حقل "المكان" في طلب/عرض قائم
-      if (st.step === "editing_field" && st.editingField === "city" && st.pendingParsed) {
-        const updated: ParsedCar = { ...st.pendingParsed, city: cityName };
-        updated.missingFields = updated.missingFields.filter((f) => f !== "city");
-        await setState(user.id, { step: "confirm_parsed", pendingParsed: updated, originalText: st.originalText });
-        await reply(
-          user.phone,
-          `✅ تحديث: ${summarize(updated)}\nهل هذا صحيح؟`,
-          [
-            { id: "confirm_yes", title: "✅ صحيح" },
-            { id: "confirm_edit", title: "✏️ تعديل حقل تاني" },
-          ],
-          user.id,
-        );
-        return;
-      }
-      return;
-    }
-
-    if (btn.startsWith("invite_accept_") || btn.startsWith("invite_reject_")) {
-      const id = btn.replace("invite_accept_", "").replace("invite_reject_", "");
-      const [invite] = await db.select().from(salesInvites).where(eq(salesInvites.id, id));
-      if (!invite) return;
-      const accepted = btn.startsWith("invite_accept_");
-      await db.update(salesInvites).set({ status: accepted ? "accepted" : "rejected" }).where(eq(salesInvites.id, id));
-      if (accepted) {
-        await db
-          .update(users)
-          .set({ showroomId: invite.showroomId, role: "sales", onboardingComplete: true, conversationState: { step: "idle" } })
-          .where(eq(users.id, user.id));
-        await reply(user.phone, "🎉 تم تسجيلك كمندوب في المعرض بنجاح!", undefined, user.id);
-      } else {
-        await reply(user.phone, "تم إلغاء الدعوة.", undefined, user.id);
-      }
-      return;
-    }
-
-    if (btn === "confirm_yes" && st.pendingParsed) {
-      if (!(await ensureSubscriptionAllowed(user.phone, user.id, user.showroomId))) return;
-      await setState(user.id, { step: "idle" });
-      if (st.originalText) {
-        saveCorrection(st.originalText, st.pendingParsed, "user_confirmed").catch(() => {});
-      }
-      await finalizeParsed(user, st.pendingParsed);
-      return;
-    }
-    if (btn === "confirm_edit" && st.pendingParsed) {
-      await setState(user.id, { step: "confirm_parsed", pendingParsed: st.pendingParsed, originalText: st.originalText });
-      await reply(
-        user.phone,
-        "أي حقل عايز تعدّله؟",
-        EDITABLE_FIELD_LABELS.map((f) => ({ id: `editfield:${f.field}`, title: f.label })),
-        user.id,
-      );
-      return;
-    }
-
-    if (btn.startsWith("match_yes_")) {
-      if (!(await ensureSubscriptionAllowed(user.phone, user.id, user.showroomId))) return;
-      const matchId = btn.replace("match_yes_", "");
-      const result = await confirmMatch(matchId);
-      if (result.ok) {
-        await reply(user.phone, "✅ تم تأكيد التوفر، سيتم توصيلك بالطالب الآن.", undefined, user.id);
-      } else {
-        await reply(user.phone, "⏱️ للأسف حد تاني رد قبلك على نفس الطلب.", undefined, user.id);
-      }
-      return;
-    }
-    if (btn.startsWith("match_no_")) {
-      const matchId = btn.replace("match_no_", "");
-      await declineMatch(matchId);
-      await reply(user.phone, "تمام، شكراً لردك.", undefined, user.id);
-      return;
-    }
-
-    if (btn.startsWith("renew_")) {
-      const reqId = btn.replace("renew_", "");
-      await db
-        .update(requestsTable)
-        .set({ expiresAt: new Date(Date.now() + 3 * 60 * 60 * 1000), reminderSent: false, renewedCount: sql`${requestsTable.renewedCount} + 1` })
-        .where(eq(requestsTable.id, reqId));
-      await reply(user.phone, "🔄 تم تجديد الطلب لمدة 3 ساعات إضافية.", undefined, user.id);
-      return;
-    }
-    if (btn.startsWith("cancel_")) {
-      const reqId = btn.replace("cancel_", "");
-      await db.update(requestsTable).set({ status: "cancelled" }).where(eq(requestsTable.id, reqId));
-      await reply(user.phone, "تم إلغاء الطلب.", undefined, user.id);
-      return;
-    }
-  }
-
-  // ── Onboarding ───────────────────────────────────────────────────────
-  if (!user.onboardingComplete) {
-    if (st.step === "ask_rep_name" || !st.step) {
-      if (st.step === "ask_rep_name" && text) {
-        await setState(user.id, { step: "ask_rep_label", pendingRepName: text });
-        await reply(user.phone, `تشرفنا يا ${text} 🙌\nإيه اسم المعرض/الجهة اللي بتشتغل بيها؟`, undefined, user.id);
-        return;
-      }
-      await setState(user.id, { step: "ask_rep_name" });
-      await reply(user.phone, "مرحباً بك في سيارة هب 🚗\nاكتب اسمك:", undefined, user.id);
-      return;
-    }
-
-    if (st.step === "ask_rep_label") {
-      await setState(user.id, { step: "ask_rep_city", pendingRepName: st.pendingRepName, pendingShowroomName: text });
-      await reply(user.phone, "تمام. في أي مدينة بتشتغل؟", cityButtons(), user.id);
-      return;
-    }
-
-    if (st.step === "ask_rep_city") {
-      await completeRepRegistration(user, st.pendingRepName, st.pendingShowroomName, text);
-      return;
-    }
-  }
-
-  // ── تعديل حقل واحد من بروفايل مستخدم مسجل بالفعل ────────────────────
-  // لازم يعيش هنا برّه بوابة "!user.onboardingComplete" فوق، لأن المستخدم
-  // اللي بيدوس "تعديل بياناتي" onboardingComplete بتاعه true بالفعل، وأي
-  // كود جوا البوابة دي كان هيتجاهل رده وتتفهم رسالته غلط كأنها وصف سيارة.
-  if (st.step === "editing_profile_field" && st.editingProfileField === "name" && text) {
-    await db.update(users).set({ name: text }).where(eq(users.id, user.id));
-    await setState(user.id, { step: "idle" });
-    await reply(user.phone, `✅ تم تحديث اسمك إلى ${text}.`, fullActionButtons(), user.id);
-    return;
-  }
-  if (st.step === "editing_profile_field" && st.editingProfileField === "showroom" && text) {
-    if (user.showroomId) {
-      await db.update(showrooms).set({ name: text }).where(eq(showrooms.id, user.showroomId));
-    }
-    await setState(user.id, { step: "idle" });
-    await reply(user.phone, `✅ تم تحديث اسم المعرض إلى ${text}.`, fullActionButtons(), user.id);
-    return;
-  }
-
-  // ── اختيار رقم عربية من ليستة "📦 مخزوني" ────────────────────────────
-  if (st.step === "viewing_inventory" && text) {
-    const num = parseInt(text.trim(), 10);
-    if (text.trim() === "0") {
-      await setState(user.id, { step: "idle" });
-      await reply(user.phone, "تمام، رجعناك للقائمة الأساسية.", fullActionButtons(), user.id);
-      return;
-    }
-    const list = st.inventoryList ?? [];
-    if (!Number.isFinite(num) || num < 1 || num > list.length) {
-      await reply(user.phone, `اكتب رقم من 1 إلى ${list.length}، أو 0 للرجوع.`, undefined, user.id);
-      return;
-    }
-    const chosenId = list[num - 1];
-    await setState(user.id, { step: "inventory_item_action", inventoryActionId: chosenId, inventoryList: list });
-    await reply(
-      user.phone,
-      "تمام، عايز تعمل إيه في العربية دي؟",
-      [
-        { id: "inv_remove", title: "🗑️ اتباعت / شيلها" },
-        { id: "inv_edit_safe", title: "✏️ تعديل بيانات" },
-        { id: "inv_back", title: "🔙 رجوع" },
-      ],
-      user.id,
-    );
-    return;
-  }
-
-  // ── تعديل حقل آمن (السعر/الوكيل/الملاحظات) في عربية متسجلة بالفعل ────
-  // مقصورة على الحقول اللي مش داخلة في حساب الـ fingerprint (ماركة/موديل/
-  // سنة/فئة/لون/مدينة)، عشان مانحتاجش نعيد حساب البصمة أو نتحقق من تعارضها
-  // مع عربية تانية. أي تعديل في الحقول دي الأسلم إنه يشيل ويضيف تاني.
-  if (st.step === "editing_inventory_safe_field" && st.inventoryActionId && st.invSafeField && text) {
-    const field = st.invSafeField;
-    if (field === "price") {
-      const priceNum = Number(text.replace(/[^\d.]/g, ""));
-      if (!Number.isFinite(priceNum) || priceNum <= 0) {
-        await reply(user.phone, "اكتب السعر أرقام بس (مثال: 85000).", undefined, user.id);
-        return;
-      }
-      await db.update(inventoryTable).set({ price: String(priceNum) }).where(eq(inventoryTable.id, st.inventoryActionId));
-    } else if (field === "spec") {
-      await db.update(inventoryTable).set({ spec: text }).where(eq(inventoryTable.id, st.inventoryActionId));
-    } else {
-      await db.update(inventoryTable).set({ extraFeatures: text }).where(eq(inventoryTable.id, st.inventoryActionId));
-    }
-    await setState(user.id, { step: "idle" });
-    await reply(user.phone, "✅ تم تحديث بيانات العربية.", fullActionButtons(), user.id);
-    return;
-  }
-
-  // ── Onboarded user flows ─────────────────────────────────────────────
-  // لو الرسالة الجديدة فيها كلمة صريحة "متوفر" أو "مطلوب"، فهي غالباً طلب
-  // جديد كامل من المستخدم، مش رد على سؤال قديم معلّق (فئة ناقصة/تأكيد).
-  // في الحالة دي نقفل أي محادثة معلقة ونبدأ من جديد بدل دمج بيانات قديمة
-  // مع الرسالة الجديدة، وده كان بيسبب خلط بيانات من طلب سابق مع طلب حالي.
-  const looksLikeFreshRequest =
-    (st.step === "confirm_parsed" || st.step === "ask_missing_field") &&
-    classifyKeyword(text) !== "unknown";
-
-  if (looksLikeFreshRequest) {
-    await setState(user.id, { step: "idle" });
-    await handleFreeText(user, text);
-    return;
-  }
-
-  if (st.step === "confirm_parsed" && st.pendingParsed) {
-    if (text.includes("صحيح") || text === "نعم") {
-      await setState(user.id, { step: "idle" });
-      if (st.originalText) {
-        saveCorrection(st.originalText, st.pendingParsed, "user_confirmed").catch(() => {});
-      }
-      await finalizeParsed(user, st.pendingParsed);
-      return;
-    }
-    if (text.includes("تعديل")) {
-      await setState(user.id, { step: "idle" });
-      await reply(user.phone, "تمام، أرسل تفاصيل السيارة الصحيحة من جديد.", undefined, user.id);
-      return;
-    }
-    await reply(
-      user.phone,
-      `هل هذا صحيح: ${summarize(st.pendingParsed)}؟`,
-      [
-        { id: "confirm_yes", title: "✅ صحيح" },
-        { id: "confirm_edit", title: "✏️ تعديل" },
-      ],
-      user.id,
-    );
-    return;
-  }
-
-  if (st.step === "editing_field" && st.pendingParsed && st.editingField) {
-    const field = st.editingField;
-    const value = extractFieldAnswer(field, text);
-    const updated = { ...st.pendingParsed, [field]: value } as ParsedCar;
-    updated.missingFields = updated.missingFields.filter((f) => f !== field);
-
-    await setState(user.id, { step: "confirm_parsed", pendingParsed: updated, originalText: st.originalText });
-    await reply(
-      user.phone,
-      `✅ تحديث: ${summarize(updated)}\nهل هذا صحيح؟`,
-      [
-        { id: "confirm_yes", title: "✅ صحيح" },
-        { id: "confirm_edit", title: "✏️ تعديل حقل تاني" },
-      ],
-      user.id,
-    );
-    return;
-  }
-
-  if (st.step === "ask_missing_field" && st.pendingParsed) {
-    const queue = [...(st.missingFieldQueue ?? [])];
-    const field = queue.shift();
-    const parsed = { ...st.pendingParsed } as ParsedCar & Record<string, unknown>;
-    const isGuidedMode = st.pendingParsed.confidence === 1;
-    const rawAnswer = text.trim();
-    const wantsSkip = rawAnswer === "-" || rawAnswer === "" || rawAnswer === "تخطي" || rawAnswer === "لا";
-    // اللون إجباري لو السيارة "متوفر" (عرض) — ميتخطاش بـ "-" زي باقي الحقول
-    // الاختيارية (الوكيل والملاحظات)، عشان معرض ميقدرش يعرض سيارة من غير
-    // ما يحدد لونها فعلياً.
-    const isSkippableField = field === "spec" || field === "extraFeatures" || (field === "color" && parsed.type === "demand");
-    const skipped = isGuidedMode && wantsSkip && isSkippableField;
-
-    if (field && isGuidedMode && wantsSkip && !isSkippableField) {
-      // حاول يتخطى حقل إجباري (زي اللون في حالة عرض) — نرفض ونوضحله السبب
-      await reply(
-        user.phone,
-        "❌ الحقل ده إجباري ومينفعش تتخطاه. " + (FIELD_QUESTIONS[field] ?? ""),
-        undefined,
-        user.id,
-      );
-      await setState(user.id, { step: "ask_missing_field", pendingParsed: parsed, originalText: st.originalText, missingFieldQueue: [field, ...queue] });
-      return;
-    }
-
-    if (field && skipped) {
-      // سؤال اختياري اتخطى (زي الوكيل أو الملاحظات) — نسيب القيمة الحالية
-      // زي ما هي (مثلاً الوكيل يفضل "سعودي" الافتراضي) وننتقل للسؤال اللي بعده.
-    } else if (field === "year" && isGuidedMode && parsed.type === "demand" && /[\/\-]/.test(rawAnswer)) {
-      // طلب عميل بس ممكن يقبل أكتر من سنة (زي "2024/2025") — نسجل أول سنة
-      // كسنة أساسية للمطابقة، والباقي بيتحط في الملاحظات عشان المندوب يشوفه
-      // ويقرر بنفسه، لأن عمود السنة في قاعدة البيانات رقم واحد بس.
-      const years = rawAnswer
-        .split(/[\/\-]/)
-        .map((p) => parseInt(p.trim(), 10))
-        .filter((n) => !isNaN(n));
-      if (years.length > 0) {
-        parsed.year = years[0] < 100 ? 2000 + years[0] : years[0];
-        if (years.length > 1) {
-          const extraYearsNote = `سنوات مقبولة كمان: ${years.slice(1).join("، ")}`;
-          parsed.extraFeatures = [parsed.extraFeatures, extraYearsNote].filter(Boolean).join("، ");
-        }
-      }
-    } else if (field && isGuidedMode && ["color", "trim", "extraFeatures"].includes(field)) {
-      // الحقول اللي ممكن يكون فيها أكتر من قيمة مفصولة بـ / أو - (زي لونين
-      // أو ملاحظتين): نقسمهم، نتحقق من كل واحدة لوحدها، ونسجل أي حاجة
-      // مجهولة في قايمة المراجعة كل واحدة على حدة بدل ما تتحط كتلة واحدة.
-      const parts = rawAnswer
-        .split(/[\/\-]/)
-        .map((p) => p.trim())
-        .filter(Boolean);
-      for (const part of parts) {
-        await flagUnknownTermForReview(field === "extraFeatures" ? "feature" : field, part, parsed.brand);
-      }
-      (parsed as Record<string, unknown>)[field] = parts.length > 0 ? parts.join("، ") : null;
-    } else if (field) {
-      // استخرج القيمة الصح للحقل المطلوب من رد المستخدم (بدل تخزين النص الخام)
-      const value = extractFieldAnswer(field, text);
-      (parsed as Record<string, unknown>)[field] = value;
-
-      // في وضع "الإدخال اليدوي خطوة بخطوة" (مش الكتابة الحرة العادية)، لو
-      // القيمة دي مش معرّفة عندنا خالص، نسجلها في قايمة المراجعة.
-      if (isGuidedMode && typeof value === "string") {
-        await flagUnknownTermForReview(field, value, parsed.brand);
-      }
-
-      // إعادة فحص الرد كامل مفيدة بس في وضع الكتابة الحرة (مش الإدخال
-      // اليدوي المُرتّب) — عشان منكسرش الترتيب الثابت اللي طلبناه.
-      if (!isGuidedMode) {
-        const rescan = await parseFreeText(text);
-        const fieldsToFill: (keyof ParsedCar)[] = ["brand", "model", "year", "trim", "color", "spec", "city"];
-        for (const f of fieldsToFill) {
-          if (!parsed[f] && rescan[f]) {
-            (parsed as Record<string, unknown>)[f] = rescan[f];
-          }
-        }
-        const stillMissing = queue.filter((q) => !parsed[q as keyof ParsedCar]);
-        queue.length = 0;
-        queue.push(...stillMissing);
-      }
-    }
-
-    await askNextMissingField(user, { step: "ask_missing_field", pendingParsed: parsed, originalText: st.originalText, missingFieldQueue: queue });
-    return;
-  }
-
-  if (st.step === "awaiting_add_sales_phone") {
-    const targetPhone = normalizePhone(text);
-    if (!user.showroomId) return;
-    const [showroom] = await db.select().from(showrooms).where(eq(showrooms.id, user.showroomId));
-    const [invite] = await db
-      .insert(salesInvites)
-      .values({ showroomId: user.showroomId, phone: targetPhone, invitedBy: user.id })
-      .returning();
-    await reply(
-      targetPhone,
-      `👋 معرض "${showroom?.name}" أضافك كمندوب. هل أنت مندوب في هذا المعرض؟`,
-      [
-        { id: `invite_accept_${invite.id}`, title: "✅ نعم" },
-        { id: `invite_reject_${invite.id}`, title: "❌ لا" },
-      ],
-    );
-    await setState(user.id, { step: "idle" });
-    await reply(user.phone, "تم إرسال الدعوة ✅", undefined, user.id);
-    return;
-  }
-
-  // Default idle-state commands
-  if (text.includes("اضف مندوب") || text.includes("أضف مندوب")) {
-    if (user.role !== "owner") {
-      await reply(user.phone, "هذا الأمر متاح فقط لصاحب المعرض.", undefined, user.id);
-      return;
-    }
-    await setState(user.id, { step: "awaiting_add_sales_phone" });
-    await reply(user.phone, "أرسل رقم جوال المندوب (مثال: 0512345678)", undefined, user.id);
-    return;
-  }
-
-  if (text.includes("صباح الخير") || text.includes("موجود اليوم") || text === "حاضر") {
-    await doCheckin(user);
-    return;
-  }
-
-  if (text.length === 0) {
-    await reply(
-      user.phone,
-      "أرسل وصف السيارة (مطلوبة أو متوفرة)، أو دوس على أحد الزرارين تحت، أو اكتب 'صباح الخير' لتسجيل حضورك.",
-      idleMenuButtons(),
-      user.id,
-    );
-    return;
-  }
-
-  await handleFreeText(user, text);
-}
